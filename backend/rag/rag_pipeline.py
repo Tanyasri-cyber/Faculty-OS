@@ -18,6 +18,7 @@ class RAGPipeline:
         self.client = None
         self.collection = None
         self.initialized = False
+        self.backup_docs = []
         
         if not CHROMA_AVAILABLE:
             print("Warning: chromadb or embedding_functions not available. RAG will run in fallback mode.")
@@ -42,9 +43,6 @@ class RAGPipeline:
         except Exception as e:
             print(f"Error initializing ChromaDB: {e}. Falling back to in-memory dictionary-based search.")
             self.initialized = False
-
-        # In-memory backup database for policies if Chroma fails or is not available
-        self.backup_docs = []
 
     def chunk_text(self, text: str, chunk_size: int = 500, overlap: int = 50) -> List[str]:
         words = text.split()
