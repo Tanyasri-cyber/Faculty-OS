@@ -196,6 +196,26 @@ export const api = {
           subject: "Design & Analysis of Algorithms"
         };
         toolCalls = [{ name: 'generate_question_paper', status: 'success', result: `Generated ${generatedQuestions.length} questions.` }];
+      } else if (agentId === 'agent6') {
+        if (msgLower.includes('critical') || msgLower.includes('warning') || msgLower.includes('cohort') || msgLower.includes('summary') || msgLower.includes('distribution')) {
+          toolCalls = [{ name: 'analyze_cohort_wellbeing', status: 'success', result: 'Processed cohort wellbeing metrics across 5 tiers.' }];
+          richData = { type: 'cohort_wellbeing_summary' };
+          mockReply = "### 🌸 Cohort Wellbeing Intelligence Summary\n\n- **🚨 Critical (0-29)**: 1 student (A. Kumar, Score 24/100, Attendance 68%)\n- **😟 Needs Attention (30-49)**: 1 student (C. Dinesh, Score 42/100)\n- **😐 Average (50-69)**: 2 students\n- **🙂 Good (70-89)**: 3 students\n- **😊 Excellent (90-100)**: 1 student\n\n**Action Advice:** Immediate outreach recommended for A. Kumar. You can use 'Suggest Prompt' to start an empathetic conversation.";
+        } else if (msgLower.includes('prompt') || msgLower.includes('starter') || msgLower.includes('suggest') || msgLower.includes('how to talk') || msgLower.includes('message')) {
+          toolCalls = [{ name: 'generate_empathy_prompt', status: 'success', result: 'Crafted 2 empathetic conversation starters.' }];
+          richData = { type: 'checkin_prompts' };
+          mockReply = "### 💬 Empathetic Conversation Starters\n\n**Option 1: Supportive Non-Threatening Nudge (Recommended)**\n> *\"Hi Kumar, I was reviewing our mentee check-ins and wanted to see how you're feeling this week. I noticed classes have been demanding lately—is everything going okay with your health, hostel, or studies? Let me know when you're free for a casual 10-minute catchup; I'm here to support you.\"*\n\n**Option 2: Gentle Academic Check-in**\n> *\"Hello Kumar, hope you're having a good week. I noticed your attendance dipped in recent DAA lectures. Let's sit together tomorrow during my counseling hour to sort out any hurdles before internal assessments.\"*";
+        } else if (msgLower.includes('escalat') || msgLower.includes('refer') || msgLower.includes('counsel') || msgLower.includes('crisis')) {
+          toolCalls = [{ name: 'prepare_counseling_referral', status: 'success', result: 'Drafted confidential counseling referral brief.' }];
+          richData = { type: 'escalation_memo' };
+          mockReply = "### 🚨 Confidential Counseling Referral Memo\n\n**To:** Head of Student Counseling / Academic Advisory Committee\n**Mentee:** A. Kumar (`2024CS001`)\n**Status:** Urgent Intervention Recommended (Tier 1)\n\n**Observed Risk Indicators:**\n- Cumulative wellbeing score dropped to 24/100 (Critical).\n- Persistent absenteeism in core modules and emotional distress signaled in previous check-in.\n\n**Recommended Step:** Scheduled confidential 1-on-1 counseling session with campus clinical counselor under NAAC Criterion 5 privacy guidelines.";
+        } else if (msgLower.includes('dossier') || msgLower.includes('naac') || msgLower.includes('nba') || msgLower.includes('criterion 5')) {
+          toolCalls = [{ name: 'generate_naac_mentoring_dossier', status: 'success', result: 'Compiled NAAC Criterion 5.1.4 Dossier.' }];
+          richData = { type: 'naac_dossier' };
+          mockReply = "### 📑 NAAC Criterion 5.1.4 Mentoring Compliance Dossier\n\n- **Mentor-Mentee Ratio:** 1:8\n- **Total Check-in Touchpoints Logged:** 24 sessions\n- **At-Risk Identification Rate:** 100% early triage\n- **Attendance Recovery Index:** 84.6% recovered required >75% attendance within 4 weeks.\n\n✅ *All records, check-in dates, and faculty signatures comply with NAAC SSR Criterion 5.*";
+        } else {
+          mockReply = "🌸 Hello! I am your **Mentor & Wellbeing Advisor** (Agent 6). I can help you evaluate student risk, draft empathetic check-in prompts, summarize raw meeting notes, or prepare confidential counseling referrals.";
+        }
       } else {
         mockReply = `Hello! I am your AI assistant (${agentId}). How can I assist you today?`;
       }
