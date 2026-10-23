@@ -1,5 +1,5 @@
 import datetime
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text, Float
 from sqlalchemy.orm import relationship
 from .database import Base
 
@@ -227,3 +227,33 @@ class Resume(Base):
     extracted_text = Column(Text, nullable=True)
     extracted_skills = Column(String, nullable=True) # JSON string or comma separated
     uploaded_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+class Event(Base):
+    __tablename__ = "events"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    type = Column(String, default="Workshop") # Workshop, Conference, FDP, Seminar, Symposium
+    date = Column(String, nullable=False)
+    venue = Column(String, nullable=False)
+    organizer = Column(String, nullable=True)
+    expected_participants = Column(Integer, default=100)
+    allocated_budget = Column(Float, default=50000.0)
+    spent_budget = Column(Float, default=0.0)
+    status = Column(String, default="planning") # planning, approved, ongoing, completed
+    timeline_json = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+class CommitteeTask(Base):
+    __tablename__ = "committee_tasks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    event_id = Column(Integer, ForeignKey("events.id"), nullable=True)
+    task = Column(String, nullable=False)
+    assigned_to = Column(String, nullable=False)
+    priority = Column(String, default="medium") # high, medium, low
+    due_date = Column(String, nullable=True)
+    status = Column(String, default="Pending") # Pending, In Progress, Completed
+    category = Column(String, default="Logistics")
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
