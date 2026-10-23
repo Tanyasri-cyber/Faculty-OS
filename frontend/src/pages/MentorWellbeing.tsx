@@ -172,6 +172,7 @@ export const MentorWellbeing: React.FC<MentorWellbeingProps> = ({ user }) => {
   const [streamingTraces, setStreamingTraces] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const [isChatOpen, setIsChatOpen] = useState(false);
 
   // ─── Voice Check-in State ─────────────────────────────────────
   const [isRecording, setIsRecording] = useState(false);
@@ -378,6 +379,7 @@ Make the bullets match the facts mentioned in the recording. Return ONLY the pla
   const handleSendChat = (preset?: string) => {
     const msg = preset || chatInput;
     if (!msg.trim()) return;
+    setIsChatOpen(true);
     const userMsg: ChatMessage = {
       id: Math.random().toString(), role: 'user', content: msg,
       timestamp: new Date().toLocaleTimeString(),
@@ -430,9 +432,10 @@ Make the bullets match the facts mentioned in the recording. Return ONLY the pla
   // ─── Quick Actions ────────────────────────────────────────────
   const QUICK_ACTIONS = [
     { icon: '🚨', label: 'Critical List', msg: 'List all critical and warning mentees needing urgent action' },
-    { icon: '💬', label: 'Suggest Prompt', msg: activeMentee ? `Suggest a check-in prompt for ${activeMentee.name} (Score: ${computeWellbeingScore(activeMentee, timeline, escalations)}/100)` : 'Suggest a check-in prompt' },
+    { icon: '💬', label: 'Suggest Prompt', msg: activeMentee ? `Suggest an empathetic check-in prompt for ${activeMentee.name} (Score: ${computeWellbeingScore(activeMentee, timeline, escalations)}/100)` : 'Suggest an empathetic check-in prompt' },
     { icon: '📊', label: 'Cohort Wellbeing', msg: 'Give me a summary of my cohort\'s wellbeing distribution' },
-    { icon: '📝', label: 'Action Advice', msg: activeMentee ? `What action should I take next for ${activeMentee.name}?` : 'What action should I take next?' },
+    { icon: '🔍', label: 'Risk Deep-Dive', msg: activeMentee ? `Evaluate risk drivers and diagnosis for ${activeMentee.name}` : 'Analyze student risk drivers' },
+    { icon: '📑', label: 'NAAC Dossier', msg: 'Generate NAAC Criterion 5.1.4 mentoring compliance dossier' },
   ];
 
   // ─── Calculated Mentee Metrics & Filtering ─────────────────────
@@ -504,6 +507,29 @@ Make the bullets match the facts mentioned in the recording. Return ONLY the pla
             <h1 className="font-display text-xl font-bold tracking-tight">Mentor & Wellbeing System</h1>
             <p className="text-[10px] text-ink-muted">Proactive Wellbeing Score monitoring, 1-on-1 check-ins, and automated intervention actions.</p>
           </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => handleSendChat('Generate NAAC Criterion 5.1.4 mentoring compliance dossier')}
+            className="text-[10px] font-mono border-pink-500/30 text-pink-300 hover:bg-pink-500/10 flex items-center gap-1.5"
+          >
+            <FileText size={12} />
+            <span className="hidden sm:inline">NAAC Dossier</span>
+          </Button>
+          <Button
+            size="sm"
+            onClick={() => setIsChatOpen(prev => !prev)}
+            className={`text-[10px] font-mono flex items-center gap-1.5 transition-all ${
+              isChatOpen 
+                ? 'bg-pink-500 text-black font-bold shadow-md shadow-pink-500/20' 
+                : 'bg-surface-raised border border-pink-500/40 text-pink-300 hover:bg-pink-500/20'
+            }`}
+          >
+            <Sparkles size={12} className={isChatOpen ? 'animate-spin' : ''} />
+            <span>AI Advisor</span>
+          </Button>
         </div>
       </div>
 
@@ -955,7 +981,7 @@ Make the bullets match the facts mentioned in the recording. Return ONLY the pla
               </Card>
 
               {/* ── WHAT ACTION SHOULD I TAKE NEXT? Card ──────────── */}
-              <div className={`p-4 rounded-lg border ${activeCategory.bg} ${activeCategory.border} space-y-2`}>
+              <div className={`p-4 rounded-lg border ${activeCategory.bg} ${activeCategory.border} space-y-3`}>
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-bold font-mono uppercase tracking-wider text-pink-400 flex items-center gap-1.5">
                     <CheckCircle2 size={14} /> Recommended Action Next
@@ -971,6 +997,24 @@ Make the bullets match the facts mentioned in the recording. Return ONLY the pla
                 <p className="text-xs leading-relaxed text-ink-muted">
                   {activeCategory.actionText}
                 </p>
+
+                {/* AI Assistant Contextual Shortcuts */}
+                <div className="pt-2 border-t border-border/40 flex flex-wrap items-center gap-2">
+                  <button
+                    onClick={() => handleSendChat(`Suggest an empathetic check-in prompt for ${activeMentee.name}`)}
+                    className="text-[10px] font-mono bg-pink-500/10 hover:bg-pink-500/20 text-pink-300 border border-pink-500/30 px-2.5 py-1 rounded-md flex items-center gap-1.5 transition-colors"
+                  >
+                    <MessageSquare size={11} />
+                    <span>Ask AI for Nudge Message</span>
+                  </button>
+                  <button
+                    onClick={() => handleSendChat(`Evaluate risk drivers and diagnosis for ${activeMentee.name}`)}
+                    className="text-[10px] font-mono bg-surface border border-border hover:border-pink-500/40 text-ink-muted hover:text-ink px-2.5 py-1 rounded-md flex items-center gap-1.5 transition-colors"
+                  >
+                    <Sparkles size={11} className="text-pink-400" />
+                    <span>Risk Deep-Dive</span>
+                  </button>
+                </div>
               </div>
 
               {/* Escalation History */}
@@ -1031,6 +1075,135 @@ Make the bullets match the facts mentioned in the recording. Return ONLY the pla
 
 
       </div>
+
+      {/* ── AI Wellbeing Advisor Floating Dock ──────────────────── */}
+      {isChatOpen ? (
+        <div className="fixed bottom-4 right-4 sm:right-6 w-96 max-w-[calc(100vw-2rem)] z-40 bg-surface/95 backdrop-blur-md border border-pink-500/40 rounded-2xl shadow-2xl flex flex-col h-[520px] overflow-hidden transition-all duration-300">
+          {/* Header */}
+          <div className="p-3 bg-surface-raised border-b border-border/80 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="w-6 h-6 rounded-lg bg-pink-500/20 border border-pink-500/30 flex items-center justify-center text-pink-400">
+                <Sparkles size={13} />
+              </div>
+              <div>
+                <div className="text-xs font-bold text-ink flex items-center gap-1.5">
+                  Wellbeing Advisor
+                  <span className="text-[8px] font-mono uppercase bg-pink-500/20 text-pink-300 px-1.5 py-0.5 rounded border border-pink-500/30 font-bold">Agent 6</span>
+                </div>
+                <div className="text-[9px] font-mono text-ink-muted truncate max-w-[190px]">
+                  {activeMentee ? `Focus: ${activeMentee.name}` : 'Cohort-wide Advisor'}
+                </div>
+              </div>
+            </div>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => setIsChatOpen(false)}
+                className="w-6 h-6 rounded-md hover:bg-surface text-ink-muted hover:text-ink flex items-center justify-center transition-colors"
+                title="Minimize Advisor"
+              >
+                <X size={14} />
+              </button>
+            </div>
+          </div>
+
+          {/* Quick Action Chips */}
+          <div className="p-2 border-b border-border/40 bg-surface flex gap-1.5 overflow-x-auto shrink-0 scrollbar-none">
+            {QUICK_ACTIONS.map((a, i) => (
+              <button
+                key={i}
+                onClick={() => handleSendChat(a.msg)}
+                disabled={isLoading}
+                className="text-[9px] font-mono bg-pink-500/10 hover:bg-pink-500/20 text-pink-300 border border-pink-500/30 px-2.5 py-1 rounded-full whitespace-nowrap transition-colors disabled:opacity-50 shrink-0 flex items-center gap-1"
+              >
+                <span>{a.icon}</span>
+                <span>{a.label}</span>
+              </button>
+            ))}
+          </div>
+
+          {/* Messages Container */}
+          <div className="p-3 flex-1 overflow-y-auto space-y-2.5 text-xs">
+            {chatMessages.map((m, idx) => (
+              <div key={idx} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                {m.role === 'assistant' && (
+                  <div className="w-5 h-5 rounded-full bg-pink-500/20 border border-pink-500/30 flex items-center justify-center shrink-0 mr-1.5 mt-0.5 text-pink-400">
+                    <Sparkles size={10} />
+                  </div>
+                )}
+                <div className={`max-w-[85%] rounded-xl px-3 py-2 text-[11px] leading-relaxed whitespace-pre-wrap ${
+                  m.role === 'user'
+                    ? 'bg-pink-600 text-white rounded-br-sm shadow-sm'
+                    : 'bg-surface-raised border border-border text-ink rounded-bl-sm shadow-sm'
+                }`}>
+                  {m.content}
+                </div>
+              </div>
+            ))}
+
+            {/* Live streaming text */}
+            {streamingText && (
+              <div className="flex justify-start">
+                <div className="w-5 h-5 rounded-full bg-pink-500/20 border border-pink-500/30 flex items-center justify-center shrink-0 mr-1.5 mt-0.5 text-pink-400">
+                  <Sparkles size={10} className="animate-pulse" />
+                </div>
+                <div className="max-w-[85%] bg-surface-raised border border-border text-ink rounded-xl rounded-bl-sm px-3 py-2 text-[11px] leading-relaxed whitespace-pre-wrap">
+                  {streamingText}
+                  <span className="inline-block w-1.5 h-3 bg-pink-400 ml-0.5 animate-pulse rounded" />
+                </div>
+              </div>
+            )}
+
+            {/* Tool traces */}
+            {isLoading && (
+              <div className="space-y-1 pl-6">
+                {streamingTraces.map((t, idx) => (
+                  <div key={idx} className="text-[9px] font-mono text-pink-400 flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-pink-400 animate-ping inline-block" />
+                    <span>⚙ {t.name}... ({t.status})</span>
+                  </div>
+                ))}
+                {!streamingText && streamingTraces.length === 0 && (
+                  <div className="text-[9px] font-mono text-ink-muted flex items-center gap-1.5">
+                    <Loader2 size={10} className="animate-spin text-pink-400" />
+                    <span>Consulting Wellbeing Advisor...</span>
+                  </div>
+                )}
+              </div>
+            )}
+            <div ref={chatEndRef} />
+          </div>
+
+          {/* Chat Input */}
+          <div className="p-2.5 bg-surface-raised border-t border-border flex gap-2">
+            <input
+              type="text"
+              placeholder="Ask about student risk, draft prompt, NAAC..."
+              value={chatInput}
+              onChange={e => setChatInput(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && !e.shiftKey && handleSendChat()}
+              disabled={isLoading}
+              className="flex-1 bg-surface border border-border text-ink text-xs rounded-xl px-3 py-2 outline-none focus:border-pink-500 transition-colors placeholder:text-ink-muted"
+            />
+            <button
+              onClick={() => handleSendChat()}
+              disabled={isLoading || !chatInput.trim()}
+              className="w-9 h-9 rounded-xl bg-pink-500 hover:bg-pink-600 text-black flex items-center justify-center transition-all disabled:opacity-40 shrink-0 shadow-md shadow-pink-500/20"
+            >
+              <Send size={14} />
+            </button>
+          </div>
+        </div>
+      ) : (
+        <button
+          onClick={() => setIsChatOpen(true)}
+          className="fixed bottom-5 right-6 z-40 bg-gradient-to-r from-pink-500 to-rose-500 hover:from-pink-400 hover:to-rose-400 text-black px-4 py-2.5 rounded-full shadow-lg shadow-pink-500/30 hover:scale-105 active:scale-95 transition-all flex items-center gap-2 font-mono text-xs font-bold cursor-pointer"
+          title="Open Wellbeing Advisor"
+        >
+          <Sparkles size={16} />
+          <span>Wellbeing Advisor</span>
+        </button>
+      )}
+
 
       {/* ── Log Check-in Modal ────────────────────────────────── */}
       {isCheckinModalOpen && activeMentee && (
