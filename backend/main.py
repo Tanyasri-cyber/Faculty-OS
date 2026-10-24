@@ -1,7 +1,7 @@
 import os
 import json
 import asyncio
-from fastapi import FastAPI, Depends, HTTPException, status, Body, UploadFile, File, Form
+from fastapi import FastAPI, Depends, HTTPException, status, Body, UploadFile, File, Form, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -12,7 +12,8 @@ from core.database import get_db, engine, Base
 from core.models import (
     Faculty, Student, AttendanceRecord, Assignment, Submission, InternalMark,
     COAttainment, FacultyWorkload, Publication, GrantOpportunity, ResearchDeadline,
-    QuestionBankItem, QuestionPaper, Rubric, Mentee, CheckIn, Escalation, Resume
+    QuestionBankItem, QuestionPaper, Rubric, Mentee, CheckIn, Escalation, Resume,
+    Alumni, PlacementDrive, Internship, StudentOffer, InterviewMaterial
 )
 from core.auth import verify_password, create_access_token, verify_token
 from core.seed import seed_database
@@ -41,6 +42,29 @@ app.add_middleware(
 # Seed database on startup
 @app.on_event("startup")
 def startup_event():
+    # ── Auto-migrate student table columns (idempotent) ────────────────
+    import sqlite3 as _sqlite3
+    db_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "edupilot.db"))
+    if os.path.exists(db_path):
+        try:
+            _conn = _sqlite3.connect(db_path)
+            _cur = _conn.cursor()
+            _existing = [col[1] for col in _cur.execute("PRAGMA table_info(student)").fetchall()]
+            _migrations = [
+                ("register_no", "TEXT"),
+                ("department", "TEXT"),
+                ("batch", "TEXT"),
+                ("placement_status", 'TEXT NOT NULL DEFAULT "Not Started"'),
+                ("is_placement_student", "INTEGER NOT NULL DEFAULT 0"),
+            ]
+            for _col, _def in _migrations:
+                if _col not in _existing:
+                    _cur.execute(f"ALTER TABLE student ADD COLUMN {_col} {_def}")
+            _conn.commit()
+            _conn.close()
+        except Exception as _me:
+            print(f"[startup] student migration warning: {_me}")
+
     db = next(get_db())
     try:
         seed_database(db)
@@ -1504,10 +1528,12 @@ def get_mentees_list(db: Session = Depends(get_db)):
             marks_val = mark_rec.total_marks if mark_rec else 40
 
             marks_pct = (marks_val / 50.0) * 100.0 if marks_val is not None else 80.0
-            computed_score = int((att_pct * 0.45) + (marks_pct * 0.45) + (10 if not m.is_overdue else -10))
+            is_overdue = "4 weeks" in str(m.last_checkin_date) or str(m.last_checkin_date) == "2026-06-29"
+            computed_score = int((att_pct * 0.45) + (marks_pct * 0.45) + (10 if not is_overdue else -10))
             computed_score = max(15, min(98, computed_score))
+            if computed_score < 50:
+                is_overdue = True
 
-            is_overdue = "4 weeks" in str(m.last_checkin_date) or m.last_checkin_date == "2026-06-29" or computed_score < 50
             res.append({
                 "id": m.id,
                 "student_id": student.id,
@@ -1641,15 +1667,14 @@ async def upload_resume(
     file: UploadFile = File(...),
     db: Session = Depends(get_db)
 ):
+    student_roll_no = student_roll_no.strip()
     student = db.query(Student).filter(Student.roll_no == student_roll_no).first()
     if not student:
-        # Auto-create for testing purposes
         student = Student(
             roll_no=student_roll_no,
             name=f"Student {student_roll_no}",
-            class_section="Unknown",
-            email=f"{student_roll_no.lower()}@student.edu",
-            mentor_faculty_id=1
+            class_section="CSE",
+            email=f"{student_roll_no.lower()}@faculty.edu"
         )
         db.add(student)
         db.commit()
@@ -1661,6 +1686,13 @@ async def upload_resume(
 
     extracted_text = extract_text_from_pdf(file_path)
     extracted_skills = extract_skills_from_text(extracted_text)
+
+    # Attempt to extract student name from PDF header if auto-enrolled with placeholder
+    if student.name.startswith("Student "):
+        lines = [l.strip() for l in extracted_text.split("\n") if l.strip()]
+        if lines and len(lines[0]) < 40 and not any(kw in lines[0].lower() for kw in ["resume", "curriculum", "vitae", "profile", "contact", "email"]):
+            student.name = lines[0]
+            db.commit()
 
     # Save to DB
     existing_resume = db.query(Resume).filter(Resume.student_id == student.id).first()
@@ -1686,7 +1718,6 @@ async def upload_resume(
                 name="student_resumes",
                 embedding_function=rag_pipeline.emb_fn
             )
-            # Use chunks if large, but for MVP we can index the whole text or chunk it.
             chunks = rag_pipeline.chunk_text(extracted_text, chunk_size=300, overlap=50)
             ids = [f"resume_{student.id}_{i}" for i in range(len(chunks))]
             metadatas = [{
@@ -1696,7 +1727,6 @@ async def upload_resume(
                 "skills": extracted_skills
             } for _ in range(len(chunks))]
             
-            # Delete old chunks if updating
             try:
                 resume_collection.delete(where={"student_id": student.id})
             except Exception:
@@ -1707,7 +1737,7 @@ async def upload_resume(
     except Exception as e:
         print(f"Failed to ingest resume to ChromaDB: {e}")
 
-    return {"status": "success", "message": "Resume uploaded successfully", "skills": extracted_skills}
+    return {"status": "success", "message": "Resume uploaded successfully", "skills": extracted_skills, "student": student.name, "roll_no": student.roll_no}
 
 @app.post("/api/resume/bulk-upload")
 async def bulk_upload_resumes(
@@ -1716,28 +1746,41 @@ async def bulk_upload_resumes(
 ):
     results = []
     for file in files:
-        # Expecting filenames like "21CS101_resume.pdf"
-        roll_no = file.filename.split("_")[0] if "_" in file.filename else file.filename.split(".")[0]
+        # Extract roll number from filename (e.g. "24CC028_Resume.pdf" -> "24CC028")
+        base_name = os.path.splitext(file.filename)[0]
+        parts = [p.strip() for p in base_name.split("_") if p.strip()]
+        roll_no = parts[0] if parts else base_name
+
         student = db.query(Student).filter(Student.roll_no == roll_no).first()
         if not student:
-            # Auto-create for testing purposes
+            candidate_name = None
+            if len(parts) > 1 and parts[1].lower() not in ("resume", "cv", "pdf"):
+                candidate_name = parts[1]
+            student_name = candidate_name if candidate_name else f"Student {roll_no}"
+
             student = Student(
                 roll_no=roll_no,
-                name=f"Student {roll_no}",
-                class_section="Unknown",
-                email=f"{roll_no.lower()}@student.edu",
-                mentor_faculty_id=1
+                name=student_name,
+                class_section="CSE",
+                email=f"{roll_no.lower()}@faculty.edu"
             )
             db.add(student)
             db.commit()
             db.refresh(student)
-            
+
         file_path = os.path.join(RESUME_UPLOAD_DIR, f"{student.roll_no}_{file.filename}")
         with open(file_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
             
         text = extract_text_from_pdf(file_path)
         skills = extract_skills_from_text(text)
+
+        # Attempt to improve student name if placeholder
+        if student.name.startswith("Student "):
+            lines = [l.strip() for l in text.split("\n") if l.strip()]
+            if lines and len(lines[0]) < 40 and not any(kw in lines[0].lower() for kw in ["resume", "curriculum", "vitae", "profile", "contact", "email"]):
+                student.name = lines[0]
+                db.commit()
         
         existing_resume = db.query(Resume).filter(Resume.student_id == student.id).first()
         if existing_resume:
@@ -1748,22 +1791,1100 @@ async def bulk_upload_resumes(
             db.add(Resume(student_id=student.id, file_path=file_path, extracted_text=text, extracted_skills=skills))
         db.commit()
         
-        results.append({"filename": file.filename, "status": "success", "student": student.name})
+        results.append({
+            "filename": file.filename,
+            "status": "success",
+            "student": student.name,
+            "roll_no": student.roll_no,
+            "skills": skills
+        })
     return {"status": "success", "results": results}
 
+from agents.placement_internships.skills_engine import (
+    SKILL_ALIASES,
+    ROLE_SKILL_MAP,
+    KNOWN_SKILLS,
+    normalize_skill,
+    extract_required_skills,
+    match_skills,
+)
+from agents.placement_internships.agent import (
+    generate_student_career_guidance,
+    generate_batch_career_guidance,
+    handle_placement_internships_chat,
+)
+
+DEMO_SAMPLE_SKILLS = [
+    "React, JavaScript, TypeScript, HTML, CSS, Redux, Next.js",
+    "Python, SQL, Node.js, Docker, AWS, REST API, FastAPI",
+    "Java, C++, Data Structures, Algorithms, SQL, Git",
+    "Python, Machine Learning, Deep Learning, SQL, Pandas, TensorFlow",
+    "AWS, Docker, Kubernetes, Linux, Python, CI/CD, Terraform",
+    "React Native, Flutter, JavaScript, Mobile Development, Java, Kotlin",
+    "HTML, CSS, JavaScript, React, UI/UX, Figma",
+]
+
 @app.get("/api/resume/all")
-def get_all_resumes(db: Session = Depends(get_db)):
-    resumes = db.query(Resume).all()
+def get_all_resumes(
+    demo: bool = Query(False, description="Set to true to return sample demo resumes for testing"),
+    db: Session = Depends(get_db)
+):
+    """
+    Returns only uploaded resumes by default.
+    Only students who have an actual uploaded resume are returned.
+    If demo=true, sample demo resumes are returned for testing.
+    """
+    if demo:
+        students = db.query(Student).all()
+        results = []
+        for idx, student in enumerate(students):
+            skills = DEMO_SAMPLE_SKILLS[idx % len(DEMO_SAMPLE_SKILLS)]
+            results.append({
+                "id": None,
+                "student_id": student.id,
+                "student_name": student.name,
+                "roll_no": student.roll_no,
+                "skills": skills,
+                "has_resume": True,
+                "demo_skills": True,
+            })
+        return {"resumes": results, "demo_mode": True}
+
+    # Only return resumes that have actually been uploaded (excluding simulated dummy records)
+    uploaded_resumes = (
+        db.query(Resume)
+        .join(Student, Resume.student_id == Student.id)
+        .filter(~Resume.file_path.like("simulated_%"))
+        .all()
+    )
+
     results = []
-    for r in resumes:
-        student = db.query(Student).filter(Student.id == r.student_id).first()
+    for r in uploaded_resumes:
+        student = r.student
+        if not student:
+            continue
         results.append({
             "id": r.id,
+            "student_id": student.id,
+            "student_name": student.name,
+            "roll_no": student.roll_no,
+            "skills": r.extracted_skills,
+            "has_resume": True,
+            "demo_skills": False,
+        })
+
+    return {"resumes": results, "demo_mode": False}
+
+@app.get("/api/resume/match-target")
+def match_resumes_to_target(
+    target_type: str = Query(..., description="'drive' or 'internship'"),
+    target_id: int = Query(..., description="ID of placement drive or internship"),
+    db: Session = Depends(get_db)
+):
+    """Match all uploaded resumes in DB against a placement drive or ongoing internship."""
+    target_type = target_type.lower().strip()
+    company_name = ""
+    role_name = ""
+    req_context = ""
+
+    if target_type in ("drive", "placement", "placement_drive"):
+        drive = db.query(PlacementDrive).filter(PlacementDrive.id == target_id).first()
+        if not drive:
+            raise HTTPException(status_code=404, detail="Placement drive not found")
+        company_name = drive.company_name
+        role_name = drive.job_roles
+        req_context = f"{drive.job_roles} {drive.eligible_branches or ''}"
+    elif target_type in ("internship", "ongoing_internship"):
+        internship = db.query(Internship).filter(Internship.id == target_id).first()
+        if not internship:
+            raise HTTPException(status_code=404, detail="Internship not found")
+        company_name = internship.company
+        role_name = internship.role or "Intern"
+        req_context = internship.role or ""
+    else:
+        raise HTTPException(status_code=400, detail="Invalid target_type. Must be 'drive' or 'internship'")
+
+    required_skills = extract_required_skills(req_context)
+    resumes = db.query(Resume).filter(~Resume.file_path.like("simulated_%")).all()
+
+    matches = []
+    for r in resumes:
+        student = db.query(Student).filter(Student.id == r.student_id).first()
+        analysis = match_skills(r.extracted_skills, required_skills)
+        matches.append({
+            "resume_id": r.id,
+            "student_id": student.id if student else None,
             "student_name": student.name if student else "Unknown",
             "roll_no": student.roll_no if student else "Unknown",
-            "skills": r.extracted_skills
+            "skills": r.extracted_skills,
+            "match_score": analysis["match_score"],
+            "matched_skills": analysis["matched_skills"],
+            "missing_skills": analysis["missing_skills"],
+            "total_required": analysis["total_required"],
+            "total_matched": analysis["total_matched"],
+            "status": analysis["status"]
         })
-    return {"resumes": results}
+
+    # Sort descending by match_score
+    matches.sort(key=lambda m: m["match_score"], reverse=True)
+
+    return {
+        "target": {
+            "id": target_id,
+            "type": target_type,
+            "company": company_name,
+            "role": role_name,
+            "required_skills": required_skills
+        },
+        "matches": matches
+    }
+
+@app.post("/api/resume/match")
+def match_resume_single(
+    payload: dict = Body(...),
+    db: Session = Depends(get_db)
+):
+    """Calculate match score and skill breakdown for arbitrary resume skills or target requirements."""
+    resume_skills = payload.get("resume_skills")
+    resume_id = payload.get("resume_id")
+
+    if resume_id and not resume_skills:
+        res = db.query(Resume).filter(Resume.id == resume_id).first()
+        if res:
+            resume_skills = res.extracted_skills
+
+    required_skills = payload.get("required_skills")
+    if not required_skills:
+        role = payload.get("role") or payload.get("job_roles") or ""
+        drive_id = payload.get("drive_id")
+        internship_id = payload.get("internship_id")
+        if drive_id:
+            d = db.query(PlacementDrive).filter(PlacementDrive.id == drive_id).first()
+            if d:
+                role = f"{d.job_roles} {d.eligible_branches or ''}"
+        elif internship_id:
+            i = db.query(Internship).filter(Internship.id == internship_id).first()
+            if i:
+                role = i.role or ""
+        required_skills = extract_required_skills(role)
+
+    result = match_skills(resume_skills, required_skills)
+    result["required_skills"] = required_skills
+    return result
+
+
+# ==========================================
+# CAREER ADVISOR AI
+# ==========================================
+
+@app.get("/api/career/guidance/{student_id}")
+def get_career_guidance_for_student(student_id: int, db: Session = Depends(get_db)):
+    """Generate personalized career guidance for a student by ID."""
+    student = db.query(Student).filter(Student.id == student_id).first()
+    if not student:
+        raise HTTPException(status_code=404, detail="Student not found")
+    return generate_student_career_guidance(student, db)
+
+@app.post("/api/career/guidance")
+def get_career_guidance_query(payload: dict = Body(...), db: Session = Depends(get_db)):
+    """Generate personalized guidance by student_id, student_name, roll_no, or custom query."""
+    student_id = payload.get("student_id")
+    student_name = payload.get("student_name")
+    roll_no = payload.get("roll_no")
+    query = payload.get("query") or payload.get("message") or ""
+
+    student = None
+    if student_id:
+        student = db.query(Student).filter(Student.id == student_id).first()
+    elif roll_no:
+        student = db.query(Student).filter(Student.roll_no == roll_no).first()
+    elif student_name:
+        student = db.query(Student).filter(Student.name.ilike(f"%{student_name}%")).first()
+
+    if student:
+        return generate_student_career_guidance(student, db, specific_query=query)
+
+    # If no specific student parameter, use the Career Advisor AI engine
+    return handle_placement_internships_chat(query, faculty_id=1, db=db)
+
+@app.get("/api/career/batch-readiness")
+def get_batch_readiness(query: str = "", db: Session = Depends(get_db)):
+    """Generate batch-wide placement readiness, drive matches, and critical skill gaps."""
+    return generate_batch_career_guidance(query, db)
+
+
+# ==========================================
+# PLACEMENT DRIVES
+# ==========================================
+
+@app.get("/api/placement/drives")
+def get_placement_drives(db: Session = Depends(get_db)):
+    """Return all placement drives ordered by visit date descending."""
+    drives = db.query(PlacementDrive).order_by(PlacementDrive.created_at.desc()).all()
+    return [
+        {
+            "id": d.id,
+            "company_name": d.company_name,
+            # convenience alias so the frontend can use either field name
+            "company": d.company_name,
+            "job_roles": d.job_roles,
+            "role": d.job_roles,
+            "eligible_branches": d.eligible_branches,
+            "min_cgpa": d.min_cgpa,
+            "expected_ctc": d.expected_ctc,
+            "visit_date": d.visit_date,
+            "date": d.visit_date,
+            "deadline_date": d.deadline_date,
+            "status": d.status,
+            "alumni_sponsor_id": d.alumni_sponsor_id,
+            "alumni_sponsor_name": d.alumni_sponsor_name,
+            "alumni_sponsor": d.alumni_sponsor_name,
+            "created_at": d.created_at.isoformat() if d.created_at else None,
+            "updated_at": d.updated_at.isoformat() if d.updated_at else None,
+        }
+        for d in drives
+    ]
+
+@app.post("/api/placement/drives")
+def create_placement_drive(
+    payload: dict = Body(...),
+    token: Optional[dict] = Depends(verify_token),
+    db: Session = Depends(get_db),
+):
+    """Create a new placement drive record."""
+    company_name = payload.get("company_name") or payload.get("company")
+    job_roles = payload.get("job_roles") or payload.get("role")
+
+    if not company_name:
+        raise HTTPException(status_code=400, detail="company_name is required")
+    if not job_roles:
+        raise HTTPException(status_code=400, detail="job_roles is required")
+
+    drive = PlacementDrive(
+        company_name=company_name,
+        job_roles=job_roles,
+        eligible_branches=payload.get("eligible_branches"),
+        min_cgpa=payload.get("min_cgpa", 0.0),
+        expected_ctc=payload.get("expected_ctc"),
+        visit_date=payload.get("visit_date") or payload.get("date"),
+        deadline_date=payload.get("deadline_date"),
+        status=payload.get("status", "Scheduled"),
+        alumni_sponsor_name=payload.get("alumni_sponsor_name") or payload.get("alumni_sponsor"),
+    )
+    db.add(drive)
+    db.commit()
+    db.refresh(drive)
+
+    return {
+        "id": drive.id,
+        "company_name": drive.company_name,
+        "company": drive.company_name,
+        "job_roles": drive.job_roles,
+        "role": drive.job_roles,
+        "eligible_branches": drive.eligible_branches,
+        "min_cgpa": drive.min_cgpa,
+        "expected_ctc": drive.expected_ctc,
+        "visit_date": drive.visit_date,
+        "date": drive.visit_date,
+        "deadline_date": drive.deadline_date,
+        "status": drive.status,
+        "alumni_sponsor_name": drive.alumni_sponsor_name,
+        "alumni_sponsor": drive.alumni_sponsor_name,
+    }
+
+@app.put("/api/placement/drives/{drive_id}")
+def update_placement_drive(
+    drive_id: int,
+    payload: dict = Body(...),
+    token: Optional[dict] = Depends(verify_token),
+    db: Session = Depends(get_db),
+):
+    """Update an existing placement drive record by ID."""
+    drive = db.query(PlacementDrive).filter(PlacementDrive.id == drive_id).first()
+    if not drive:
+        raise HTTPException(status_code=404, detail="Placement drive not found")
+
+    # Accept either field name variant
+    if "company_name" in payload or "company" in payload:
+        drive.company_name = payload.get("company_name") or payload.get("company")
+    if "job_roles" in payload or "role" in payload:
+        drive.job_roles = payload.get("job_roles") or payload.get("role")
+    if "eligible_branches" in payload:
+        drive.eligible_branches = payload["eligible_branches"]
+    if "min_cgpa" in payload:
+        drive.min_cgpa = payload["min_cgpa"]
+    if "expected_ctc" in payload:
+        drive.expected_ctc = payload["expected_ctc"]
+    if "visit_date" in payload or "date" in payload:
+        drive.visit_date = payload.get("visit_date") or payload.get("date")
+    if "deadline_date" in payload:
+        drive.deadline_date = payload["deadline_date"]
+    if "status" in payload:
+        drive.status = payload["status"]
+    if "alumni_sponsor_name" in payload or "alumni_sponsor" in payload:
+        drive.alumni_sponsor_name = payload.get("alumni_sponsor_name") or payload.get("alumni_sponsor")
+
+    db.commit()
+    db.refresh(drive)
+
+    return {
+        "id": drive.id,
+        "company_name": drive.company_name,
+        "company": drive.company_name,
+        "job_roles": drive.job_roles,
+        "role": drive.job_roles,
+        "eligible_branches": drive.eligible_branches,
+        "min_cgpa": drive.min_cgpa,
+        "expected_ctc": drive.expected_ctc,
+        "visit_date": drive.visit_date,
+        "date": drive.visit_date,
+        "deadline_date": drive.deadline_date,
+        "status": drive.status,
+        "alumni_sponsor_name": drive.alumni_sponsor_name,
+        "alumni_sponsor": drive.alumni_sponsor_name,
+    }
+
+@app.delete("/api/placement/drives/{drive_id}")
+@app.delete("/api/drives/{drive_id}")
+def delete_placement_drive(
+    drive_id: int,
+    token: Optional[dict] = Depends(verify_token),
+    db: Session = Depends(get_db),
+):
+    """Delete a placement drive record by ID."""
+    drive = db.query(PlacementDrive).filter(PlacementDrive.id == drive_id).first()
+    if not drive:
+        raise HTTPException(status_code=404, detail="Placement drive not found")
+    db.delete(drive)
+    db.commit()
+    return {"status": "success", "message": "Placement drive deleted"}
+
+# ==========================================
+# INTERNSHIPS
+# ==========================================
+
+@app.get("/api/internships")
+@app.get("/api/placement/internships")
+def get_internships(db: Session = Depends(get_db)):
+    """Return all internships ordered by created_at descending."""
+    internships = db.query(Internship).order_by(Internship.created_at.desc()).all()
+    return [
+        {
+            "id": i.id,
+            "student_id": i.student_id,
+            "student_name": i.student_name,
+            "company": i.company,
+            "role": i.role,
+            "duration": i.duration,
+            "stipend": i.stipend,
+            "status": i.status,
+            "start_date": i.start_date,
+            "end_date": i.end_date,
+            "created_at": i.created_at.isoformat() if i.created_at else None,
+            "updated_at": i.updated_at.isoformat() if i.updated_at else None,
+        }
+        for i in internships
+    ]
+
+@app.post("/api/internships")
+@app.post("/api/placement/internships")
+def create_internship(
+    payload: dict = Body(...),
+    token: Optional[dict] = Depends(verify_token),
+    db: Session = Depends(get_db),
+):
+    """Create a new internship record."""
+    company = payload.get("company")
+    if not company or not str(company).strip():
+        raise HTTPException(status_code=400, detail="company is required")
+
+    internship = Internship(
+        student_id=payload.get("student_id"),
+        student_name=payload.get("student_name") or payload.get("name"),
+        company=str(company).strip(),
+        role=payload.get("role"),
+        duration=payload.get("duration"),
+        stipend=payload.get("stipend"),
+        status=payload.get("status", "Ongoing"),
+        start_date=payload.get("start_date"),
+        end_date=payload.get("end_date"),
+    )
+    db.add(internship)
+    db.commit()
+    db.refresh(internship)
+
+    return {
+        "id": internship.id,
+        "student_id": internship.student_id,
+        "student_name": internship.student_name,
+        "company": internship.company,
+        "role": internship.role,
+        "duration": internship.duration,
+        "stipend": internship.stipend,
+        "status": internship.status,
+        "start_date": internship.start_date,
+        "end_date": internship.end_date,
+        "created_at": internship.created_at.isoformat() if internship.created_at else None,
+        "updated_at": internship.updated_at.isoformat() if internship.updated_at else None,
+    }
+
+@app.put("/api/internships/{internship_id}")
+@app.put("/api/placement/internships/{internship_id}")
+def update_internship(
+    internship_id: int,
+    payload: dict = Body(...),
+    token: Optional[dict] = Depends(verify_token),
+    db: Session = Depends(get_db),
+):
+    """Update an existing internship record by ID."""
+    internship = db.query(Internship).filter(Internship.id == internship_id).first()
+    if not internship:
+        raise HTTPException(status_code=404, detail="Internship not found")
+
+    if "company" in payload:
+        val = str(payload.get("company", "")).strip()
+        if not val:
+            raise HTTPException(status_code=400, detail="company cannot be empty")
+        internship.company = val
+    if "student_name" in payload or "name" in payload:
+        internship.student_name = payload.get("student_name") or payload.get("name")
+    if "student_id" in payload:
+        internship.student_id = payload.get("student_id")
+    if "role" in payload:
+        internship.role = payload.get("role")
+    if "duration" in payload:
+        internship.duration = payload.get("duration")
+    if "stipend" in payload:
+        internship.stipend = payload.get("stipend")
+    if "status" in payload:
+        internship.status = payload.get("status")
+    if "start_date" in payload:
+        internship.start_date = payload.get("start_date")
+    if "end_date" in payload:
+        internship.end_date = payload.get("end_date")
+
+    db.commit()
+    db.refresh(internship)
+
+    return {
+        "id": internship.id,
+        "student_id": internship.student_id,
+        "student_name": internship.student_name,
+        "company": internship.company,
+        "role": internship.role,
+        "duration": internship.duration,
+        "stipend": internship.stipend,
+        "status": internship.status,
+        "start_date": internship.start_date,
+        "end_date": internship.end_date,
+        "created_at": internship.created_at.isoformat() if internship.created_at else None,
+        "updated_at": internship.updated_at.isoformat() if internship.updated_at else None,
+    }
+
+@app.delete("/api/internships/{internship_id}")
+@app.delete("/api/placement/internships/{internship_id}")
+def delete_internship(
+    internship_id: int,
+    token: Optional[dict] = Depends(verify_token),
+    db: Session = Depends(get_db),
+):
+    """Delete an internship record by ID."""
+    internship = db.query(Internship).filter(Internship.id == internship_id).first()
+    if not internship:
+        raise HTTPException(status_code=404, detail="Internship not found")
+    db.delete(internship)
+    db.commit()
+    return {"status": "success", "message": "Internship deleted"}
+
+# ==========================================
+# STUDENT OFFERS
+# ==========================================
+
+@app.get("/api/offers")
+@app.get("/api/placement/offers")
+@app.get("/api/student-offers")
+def get_student_offers(db: Session = Depends(get_db)):
+    """Return all student placement offers ordered by created_at descending."""
+    offers = db.query(StudentOffer).order_by(StudentOffer.created_at.desc()).all()
+    return [
+        {
+            "id": o.id,
+            "student_id": o.student_id,
+            "student_name": o.student_name,
+            "placement_drive_id": o.placement_drive_id,
+            "company": o.company,
+            "role": o.role,
+            "ctc": o.ctc,
+            "status": o.status,
+            "offer_letter_url": o.offer_letter_url,
+            "offered_date": o.offered_date,
+            "created_at": o.created_at.isoformat() if o.created_at else None,
+            "updated_at": o.updated_at.isoformat() if o.updated_at else None,
+        }
+        for o in offers
+    ]
+
+@app.post("/api/offers")
+@app.post("/api/placement/offers")
+@app.post("/api/student-offers")
+def create_student_offer(
+    payload: dict = Body(...),
+    token: Optional[dict] = Depends(verify_token),
+    db: Session = Depends(get_db),
+):
+    """Create a new student offer record."""
+    company = payload.get("company")
+    role = payload.get("role")
+
+    if not company or not str(company).strip():
+        raise HTTPException(status_code=400, detail="company is required")
+    if not role or not str(role).strip():
+        raise HTTPException(status_code=400, detail="role is required")
+
+    ctc_val = 0.0
+    if "ctc" in payload and payload["ctc"] is not None and str(payload["ctc"]).strip() != "":
+        try:
+            ctc_val = float(payload["ctc"])
+        except (ValueError, TypeError):
+            raise HTTPException(status_code=400, detail="ctc must be a valid number")
+
+    offer = StudentOffer(
+        student_id=payload.get("student_id"),
+        student_name=payload.get("student_name") or payload.get("name"),
+        placement_drive_id=payload.get("placement_drive_id"),
+        company=str(company).strip(),
+        role=str(role).strip(),
+        ctc=ctc_val,
+        status=payload.get("status", "Accepted"),
+        offer_letter_url=payload.get("offer_letter_url"),
+        offered_date=payload.get("offered_date") or payload.get("date"),
+    )
+    db.add(offer)
+    db.commit()
+    db.refresh(offer)
+
+    return {
+        "id": offer.id,
+        "student_id": offer.student_id,
+        "student_name": offer.student_name,
+        "placement_drive_id": offer.placement_drive_id,
+        "company": offer.company,
+        "role": offer.role,
+        "ctc": offer.ctc,
+        "status": offer.status,
+        "offer_letter_url": offer.offer_letter_url,
+        "offered_date": offer.offered_date,
+        "created_at": offer.created_at.isoformat() if offer.created_at else None,
+        "updated_at": offer.updated_at.isoformat() if offer.updated_at else None,
+    }
+
+@app.put("/api/offers/{offer_id}")
+@app.put("/api/placement/offers/{offer_id}")
+@app.put("/api/student-offers/{offer_id}")
+def update_student_offer(
+    offer_id: int,
+    payload: dict = Body(...),
+    token: Optional[dict] = Depends(verify_token),
+    db: Session = Depends(get_db),
+):
+    """Update an existing student offer record by ID."""
+    offer = db.query(StudentOffer).filter(StudentOffer.id == offer_id).first()
+    if not offer:
+        raise HTTPException(status_code=404, detail="Student offer not found")
+
+    if "company" in payload:
+        val = str(payload.get("company", "")).strip()
+        if not val:
+            raise HTTPException(status_code=400, detail="company cannot be empty")
+        offer.company = val
+    if "role" in payload:
+        val = str(payload.get("role", "")).strip()
+        if not val:
+            raise HTTPException(status_code=400, detail="role cannot be empty")
+        offer.role = val
+    if "ctc" in payload and payload["ctc"] is not None and str(payload["ctc"]).strip() != "":
+        try:
+            offer.ctc = float(payload["ctc"])
+        except (ValueError, TypeError):
+            raise HTTPException(status_code=400, detail="ctc must be a valid number")
+    if "student_name" in payload or "name" in payload:
+        offer.student_name = payload.get("student_name") or payload.get("name")
+    if "student_id" in payload:
+        offer.student_id = payload.get("student_id")
+    if "placement_drive_id" in payload:
+        offer.placement_drive_id = payload.get("placement_drive_id")
+    if "status" in payload:
+        offer.status = payload["status"]
+    if "offer_letter_url" in payload:
+        offer.offer_letter_url = payload["offer_letter_url"]
+    if "offered_date" in payload or "date" in payload:
+        offer.offered_date = payload.get("offered_date") or payload.get("date")
+
+    db.commit()
+    db.refresh(offer)
+
+    return {
+        "id": offer.id,
+        "student_id": offer.student_id,
+        "student_name": offer.student_name,
+        "placement_drive_id": offer.placement_drive_id,
+        "company": offer.company,
+        "role": offer.role,
+        "ctc": offer.ctc,
+        "status": offer.status,
+        "offer_letter_url": offer.offer_letter_url,
+        "offered_date": offer.offered_date,
+        "created_at": offer.created_at.isoformat() if offer.created_at else None,
+        "updated_at": offer.updated_at.isoformat() if offer.updated_at else None,
+    }
+
+@app.delete("/api/offers/{offer_id}")
+@app.delete("/api/placement/offers/{offer_id}")
+@app.delete("/api/student-offers/{offer_id}")
+def delete_student_offer(
+    offer_id: int,
+    token: Optional[dict] = Depends(verify_token),
+    db: Session = Depends(get_db),
+):
+    """Delete a student offer record by ID."""
+    offer = db.query(StudentOffer).filter(StudentOffer.id == offer_id).first()
+    if not offer:
+        raise HTTPException(status_code=404, detail="Student offer not found")
+    db.delete(offer)
+    db.commit()
+    return {"status": "success", "message": "Student offer deleted"}
+
+# ==========================================
+# INTERVIEW PREP MATERIALS
+# ==========================================
+
+@app.get("/api/interview-materials")
+@app.get("/api/placement/interview-materials")
+@app.get("/api/interview-prep")
+def get_interview_materials(db: Session = Depends(get_db)):
+    """Return all interview preparation materials ordered by created_at descending."""
+    materials = db.query(InterviewMaterial).order_by(InterviewMaterial.created_at.desc()).all()
+    
+    # Auto-seed initial demo materials if table is empty
+    if not materials:
+        seed_items = [
+            InterviewMaterial(
+                company="Google",
+                title="Google SDE Interview Questions",
+                role="SDE",
+                category="Interview Questions",
+                contributor_name="Siddharth M (Class of 2024)",
+                content="Key focus areas: Data Structures & Algorithms (Graphs, DP, Trees), System Design fundamentals, and Behavioral leadership principles. Typical 4-5 rounds including coding and Googleyness.",
+            ),
+            InterviewMaterial(
+                company="Amazon",
+                title="Amazon OA Tips & Tricks",
+                role="SDE 1",
+                category="OA Tips",
+                contributor_name="Preethi (Class of 2025)",
+                content="Online Assessment overview: 1) Work Styles assessment reflecting 16 Leadership Principles, 2) Debugging section speed tips, 3) Two LeetCode Medium coding questions focusing on Arrays, HashMaps, and BFS/DFS.",
+            ),
+        ]
+        for item in seed_items:
+            db.add(item)
+        db.commit()
+        materials = db.query(InterviewMaterial).order_by(InterviewMaterial.created_at.desc()).all()
+
+    return [
+        {
+            "id": m.id,
+            "company": m.company,
+            "title": m.title,
+            "role": m.role,
+            "category": m.category,
+            "content": m.content,
+            "file_url": m.file_url,
+            "contributor_alumni_id": m.contributor_alumni_id,
+            "contributor_name": m.contributor_name,
+            "placement_drive_id": m.placement_drive_id,
+            "created_at": m.created_at.isoformat() if m.created_at else None,
+            "updated_at": m.updated_at.isoformat() if m.updated_at else None,
+        }
+        for m in materials
+    ]
+
+@app.post("/api/interview-materials")
+@app.post("/api/placement/interview-materials")
+@app.post("/api/interview-prep")
+def create_interview_material(
+    payload: dict = Body(...),
+    token: Optional[dict] = Depends(verify_token),
+    db: Session = Depends(get_db),
+):
+    """Create a new interview preparation material record."""
+    title = payload.get("title")
+    company = payload.get("company")
+
+    if not title or not str(title).strip():
+        raise HTTPException(status_code=400, detail="title is required")
+    if not company or not str(company).strip():
+        raise HTTPException(status_code=400, detail="company is required")
+
+    material = InterviewMaterial(
+        company=str(company).strip(),
+        title=str(title).strip(),
+        role=payload.get("role"),
+        category=payload.get("category", "Interview Questions"),
+        content=payload.get("content"),
+        file_url=payload.get("file_url"),
+        contributor_alumni_id=payload.get("contributor_alumni_id"),
+        contributor_name=payload.get("contributor_name"),
+        placement_drive_id=payload.get("placement_drive_id"),
+    )
+    db.add(material)
+    db.commit()
+    db.refresh(material)
+
+    return {
+        "id": material.id,
+        "company": material.company,
+        "title": material.title,
+        "role": material.role,
+        "category": material.category,
+        "content": material.content,
+        "file_url": material.file_url,
+        "contributor_alumni_id": material.contributor_alumni_id,
+        "contributor_name": material.contributor_name,
+        "placement_drive_id": material.placement_drive_id,
+        "created_at": material.created_at.isoformat() if material.created_at else None,
+        "updated_at": material.updated_at.isoformat() if material.updated_at else None,
+    }
+
+@app.put("/api/interview-materials/{material_id}")
+@app.put("/api/placement/interview-materials/{material_id}")
+@app.put("/api/interview-prep/{material_id}")
+def update_interview_material(
+    material_id: int,
+    payload: dict = Body(...),
+    token: Optional[dict] = Depends(verify_token),
+    db: Session = Depends(get_db),
+):
+    """Update an existing interview material record by ID."""
+    material = db.query(InterviewMaterial).filter(InterviewMaterial.id == material_id).first()
+    if not material:
+        raise HTTPException(status_code=404, detail="Interview material not found")
+
+    if "title" in payload:
+        val = str(payload.get("title", "")).strip()
+        if not val:
+            raise HTTPException(status_code=400, detail="title cannot be empty")
+        material.title = val
+    if "company" in payload:
+        val = str(payload.get("company", "")).strip()
+        if not val:
+            raise HTTPException(status_code=400, detail="company cannot be empty")
+        material.company = val
+    if "role" in payload:
+        material.role = payload.get("role")
+    if "category" in payload:
+        material.category = payload.get("category")
+    if "content" in payload:
+        material.content = payload.get("content")
+    if "file_url" in payload:
+        material.file_url = payload.get("file_url")
+    if "contributor_name" in payload:
+        material.contributor_name = payload.get("contributor_name")
+    if "contributor_alumni_id" in payload:
+        material.contributor_alumni_id = payload.get("contributor_alumni_id")
+    if "placement_drive_id" in payload:
+        material.placement_drive_id = payload.get("placement_drive_id")
+
+    db.commit()
+    db.refresh(material)
+
+    return {
+        "id": material.id,
+        "company": material.company,
+        "title": material.title,
+        "role": material.role,
+        "category": material.category,
+        "content": material.content,
+        "file_url": material.file_url,
+        "contributor_alumni_id": material.contributor_alumni_id,
+        "contributor_name": material.contributor_name,
+        "placement_drive_id": material.placement_drive_id,
+        "created_at": material.created_at.isoformat() if material.created_at else None,
+        "updated_at": material.updated_at.isoformat() if material.updated_at else None,
+    }
+
+@app.delete("/api/interview-materials/{material_id}")
+@app.delete("/api/placement/interview-materials/{material_id}")
+@app.delete("/api/interview-prep/{material_id}")
+def delete_interview_material(
+    material_id: int,
+    token: Optional[dict] = Depends(verify_token),
+    db: Session = Depends(get_db),
+):
+    """Delete an interview material record by ID."""
+    material = db.query(InterviewMaterial).filter(InterviewMaterial.id == material_id).first()
+    if not material:
+        raise HTTPException(status_code=404, detail="Interview material not found")
+    db.delete(material)
+    db.commit()
+    return {"status": "success", "message": "Interview material deleted"}
+
+
+
+
+# ==========================================
+# PLACEMENT NAMELIST & STATUS TRACKING
+# ==========================================
+from agents.placement_internships.namelist_parser import parse_namelist, VALID_STATUSES
+
+_PLACEMENT_IMPORT_LIMIT = 500  # max rows per import
+
+@app.post("/api/placement/namelist/parse")
+async def placement_parse_namelist(
+    file: UploadFile = File(...),
+    token_data: dict = Depends(verify_token),
+):
+    """
+    Accept a PDF, Excel (.xlsx), or CSV file and return extracted headers,
+    a suggested column mapping, and a preview of the rows.
+    No data is written to the database.
+    """
+    content = await file.read()
+    if len(content) == 0:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty.")
+    if len(content) > 20 * 1024 * 1024:  # 20 MB guard
+        raise HTTPException(status_code=413, detail="File too large. Maximum size is 20 MB.")
+
+    result = parse_namelist(content, file.filename or "upload")
+    return result
+
+
+@app.post("/api/placement/namelist/import")
+def placement_import_namelist(
+    payload: dict = Body(...),
+    db: Session = Depends(get_db),
+    token_data: dict = Depends(verify_token),
+):
+    """
+    Commit mapped rows to the student table (upsert by roll_no or register_no).
+    payload = {
+      "rows": [...],
+      "mapping": { "roll_no": ..., "name": ..., "register_no": ..., "department": ..., "batch": ... },
+      "replace_existing": bool  # if True, previous placement students are cleared from the active placement list
+    }
+    """
+    rows = payload.get("rows", [])
+    mapping = payload.get("mapping", {})
+    replace_existing = payload.get("replace_existing", False)
+
+    if not rows:
+        raise HTTPException(status_code=400, detail="No rows provided.")
+
+    if len(rows) > _PLACEMENT_IMPORT_LIMIT:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Too many rows ({len(rows)}). Maximum per import is {_PLACEMENT_IMPORT_LIMIT}.",
+        )
+
+    # If replace_existing is selected, clear placement flag from previous students
+    if replace_existing:
+        db.query(Student).filter(Student.is_placement_student == True).update({"is_placement_student": False})
+        db.commit()
+
+    imported = skipped = duplicates = 0
+
+    for idx, raw_row in enumerate(rows):
+        if not raw_row or not any(str(v).strip() for v in raw_row.values()):
+            skipped += 1
+            continue
+
+        # 1. Resolve student name
+        name = str(raw_row.get(mapping.get("name", ""), "") or "").strip()
+        if not name:
+            # Fallback 1: check any key with "name"
+            for k, v in raw_row.items():
+                if "name" in k.lower() and str(v).strip():
+                    name = str(v).strip()
+                    break
+        if not name:
+            # Fallback 2: first text value with >=2 alpha characters
+            for k, v in raw_row.items():
+                val = str(v).strip()
+                if len(val) >= 2 and any(c.isalpha() for c in val) and not val.replace(".", "").isdigit():
+                    if not any(kw in k.lower() for kw in ["dept", "batch", "branch", "year"]):
+                        name = val
+                        break
+
+        # If still no name, skip
+        if not name or len(name) < 2:
+            skipped += 1
+            continue
+
+        # 2. Resolve roll_no and register_no
+        roll_no = str(raw_row.get(mapping.get("roll_no", ""), "") or "").strip()
+        register_no = str(raw_row.get(mapping.get("register_no", ""), "") or "").strip()
+
+        # Clean float .0 formatting from Excel
+        if roll_no.endswith(".0") and roll_no[:-2].isdigit():
+            roll_no = roll_no[:-2]
+        if register_no.endswith(".0") and register_no[:-2].isdigit():
+            register_no = register_no[:-2]
+
+        # Fallback for roll/register if both are missing
+        if not roll_no and not register_no:
+            for k, v in raw_row.items():
+                kl = k.lower()
+                val = str(v).strip()
+                if val.endswith(".0") and val[:-2].isdigit():
+                    val = val[:-2]
+                if val and any(x in kl for x in ["reg", "univ"]):
+                    register_no = val
+                    break
+                elif val and any(x in kl for x in ["roll", "sno", "s.no", "sl.no", "id", "serial"]):
+                    roll_no = val
+                    break
+
+        # Fallback 2: Generate sequential student ID if neither roll nor reg exists
+        if not roll_no and not register_no:
+            roll_no = f"STU{idx + 1:03d}"
+
+        # Resolve department and batch
+        department = str(raw_row.get(mapping.get("department", ""), "") or "").strip() or "CSE"
+        batch = str(raw_row.get(mapping.get("batch", ""), "") or "").strip() or "2022-2026"
+
+        effective_roll = roll_no or register_no
+        email_fallback = f"{effective_roll.lower().replace(' ', '')}@student.edu"
+
+        # Upsert: find existing student by roll_no or register_no
+        existing: Student | None = None
+        if roll_no:
+            existing = db.query(Student).filter(Student.roll_no == roll_no).first()
+        if existing is None and register_no:
+            existing = db.query(Student).filter(Student.register_no == register_no).first()
+
+        if existing:
+            existing.is_placement_student = True
+            existing.name = name
+            if register_no:
+                existing.register_no = register_no
+            if department and department != "CSE":
+                existing.department = department
+            if batch and batch != "2022-2026":
+                existing.batch = batch
+            duplicates += 1
+        else:
+            new_student = Student(
+                student_id=register_no or effective_roll,
+                roll_no=effective_roll,
+                register_no=register_no or None,
+                name=name,
+                class_section=department,
+                department=department,
+                batch=batch,
+                placement_status="Not Started",
+                is_placement_student=True,
+                email=email_fallback,
+            )
+            db.add(new_student)
+            imported += 1
+
+    db.commit()
+    return {"imported": imported, "skipped": skipped, "duplicates": duplicates}
+
+
+@app.get("/api/placement/students")
+def placement_list_students(
+    search: Optional[str] = Query(None),
+    status_filter: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    token_data: dict = Depends(verify_token),
+):
+    """Return all students enrolled in placement tracking (excludes un-enrolled demo students)."""
+    # Only return students explicitly enrolled in placement tracking
+    q = db.query(Student).filter(Student.is_placement_student == True)
+
+    if search:
+        like = f"%{search}%"
+        q = q.filter(
+            (Student.name.ilike(like))
+            | (Student.roll_no.ilike(like))
+            | (Student.register_no.ilike(like))
+            | (Student.department.ilike(like))
+        )
+
+    if status_filter and status_filter in VALID_STATUSES:
+        q = q.filter(Student.placement_status == status_filter)
+
+    students = q.order_by(Student.name).all()
+
+    return [
+        {
+            "id": s.id,
+            "roll_no": s.roll_no,
+            "register_no": s.register_no,
+            "name": s.name,
+            "department": s.department or s.class_section or "CSE",
+            "batch": s.batch or "2022-2026",
+            "placement_status": s.placement_status or "Not Started",
+            "email": s.email,
+        }
+        for s in students
+    ]
+
+
+@app.delete("/api/placement/students/{student_id}")
+def placement_delete_student(
+    student_id: int,
+    db: Session = Depends(get_db),
+    token_data: dict = Depends(verify_token),
+):
+    """Remove a student from placement tracking."""
+    student = db.query(Student).filter(Student.id == student_id).first()
+    if not student:
+        raise HTTPException(status_code=404, detail="Student not found.")
+    student.is_placement_student = False
+    db.commit()
+    return {"status": "success", "message": f"Student {student.name} removed from placement tracking."}
+
+
+@app.post("/api/placement/students/clear")
+def placement_clear_all_students(
+    db: Session = Depends(get_db),
+    token_data: dict = Depends(verify_token),
+):
+    """Clear all students from active placement tracking."""
+    count = db.query(Student).filter(Student.is_placement_student == True).update({"is_placement_student": False})
+    db.commit()
+    return {"status": "success", "cleared": count}
+
+
+@app.patch("/api/placement/students/{student_id}/status")
+def placement_update_student_status(
+    student_id: int,
+    payload: dict = Body(...),
+    db: Session = Depends(get_db),
+    token_data: dict = Depends(verify_token),
+):
+    """Update a student's placement_status. Valid values: Not Started, Not Placed, Placed, Internship, In Progress."""
+    new_status = str(payload.get("status", "")).strip()
+    if new_status not in VALID_STATUSES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Invalid status '{new_status}'. Must be one of: {', '.join(sorted(VALID_STATUSES))}",
+        )
+
+    student = db.query(Student).filter(Student.id == student_id).first()
+    if not student:
+        raise HTTPException(status_code=404, detail="Student not found.")
+
+    student.placement_status = new_status
+    student.is_placement_student = True
+    db.commit()
+    return {
+        "id": student.id,
+        "roll_no": student.roll_no,
+        "name": student.name,
+        "placement_status": student.placement_status,
+    }
 
 
 # ==========================================

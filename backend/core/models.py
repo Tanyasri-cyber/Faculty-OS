@@ -1,5 +1,5 @@
 import datetime
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text
+from sqlalchemy import Column, Integer, Float, Boolean, String, DateTime, ForeignKey, Text
 from sqlalchemy.orm import relationship
 from .database import Base
 
@@ -51,12 +51,21 @@ class Student(Base):
     __tablename__ = "student"
 
     id = Column(Integer, primary_key=True, index=True)
-    student_id = Column(String, unique=True, index=True, nullable=True)
+    student_id = Column(String, unique=True, index=True, nullable=True)  # Legacy ID / Register Number
+    register_no = Column(String, index=True, nullable=True)             # Formal Register Number
     roll_no = Column(String, unique=True, index=True, nullable=False)
     name = Column(String, nullable=False)
-    class_section = Column(String, nullable=False)
+    class_section = Column(String, nullable=False, default="CSE")
+    department = Column(String, nullable=True, default="CSE")
+    batch = Column(String, nullable=True, default="2022-2026")
+    placement_status = Column(String, nullable=False, default="Not Started") # "Not Started", "In Progress", "Placed", "Internship", "Not Placed"
+    is_placement_student = Column(Boolean, nullable=False, default=False)
     mentor_faculty_id = Column(Integer, ForeignKey("faculty.id"), nullable=True)
     email = Column(String, nullable=False)
+
+    resumes = relationship("Resume", back_populates="student", cascade="all, delete-orphan")
+    internships = relationship("Internship", back_populates="student")
+    offers = relationship("StudentOffer", back_populates="student")
 
 class AttendanceRecord(Base):
     __tablename__ = "attendance_record"
@@ -227,3 +236,99 @@ class Resume(Base):
     extracted_text = Column(Text, nullable=True)
     extracted_skills = Column(String, nullable=True) # JSON string or comma separated
     uploaded_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+    student = relationship("Student", back_populates="resumes")
+
+class Alumni(Base):
+    __tablename__ = "alumni"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    batch = Column(String, nullable=True)  # e.g., "2024"
+    branch = Column(String, nullable=True)  # e.g., "CSE"
+    company = Column(String, nullable=True)  # Current employer
+    designation = Column(String, nullable=True)  # e.g., "Software Engineer"
+    email = Column(String, nullable=True)
+    phone = Column(String, nullable=True)
+    willing_to_refer = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+    sponsored_drives = relationship("PlacementDrive", back_populates="alumni_sponsor")
+    interview_materials = relationship("InterviewMaterial", back_populates="contributor_alumni")
+
+class PlacementDrive(Base):
+    __tablename__ = "placement_drive"
+
+    id = Column(Integer, primary_key=True, index=True)
+    company_name = Column(String, index=True, nullable=False)
+    job_roles = Column(String, nullable=False)  # e.g. "Software Engineer, Frontend Developer"
+    eligible_branches = Column(String, nullable=True)  # e.g. "CSE, IT, ECE"
+    min_cgpa = Column(Float, nullable=True, default=0.0)
+    expected_ctc = Column(String, nullable=True)  # e.g. "12 LPA"
+    visit_date = Column(String, nullable=True)  # e.g. "2026-09-15"
+    deadline_date = Column(String, nullable=True)
+    status = Column(String, default="Scheduled")  # "Scheduled", "Ongoing", "Completed", "Cancelled"
+    alumni_sponsor_id = Column(Integer, ForeignKey("alumni.id"), nullable=True)
+    alumni_sponsor_name = Column(String, nullable=True)  # Snapshot / fallback if not linked to an alumni row
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+
+    alumni_sponsor = relationship("Alumni", back_populates="sponsored_drives")
+    offers = relationship("StudentOffer", back_populates="placement_drive", cascade="all, delete-orphan")
+    interview_materials = relationship("InterviewMaterial", back_populates="placement_drive")
+
+class Internship(Base):
+    __tablename__ = "internship"
+
+    id = Column(Integer, primary_key=True, index=True)
+    student_id = Column(Integer, ForeignKey("student.id"), nullable=True)
+    student_name = Column(String, nullable=True)  # Name snapshot / fallback
+    company = Column(String, index=True, nullable=False)
+    role = Column(String, nullable=True)
+    duration = Column(String, nullable=True)  # e.g. "6 months"
+    stipend = Column(String, nullable=True)  # e.g. "40,000 / month"
+    status = Column(String, default="Ongoing")  # "Ongoing", "Completed", "PPO Offered"
+    start_date = Column(String, nullable=True)
+    end_date = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+
+    student = relationship("Student", back_populates="internships")
+
+class StudentOffer(Base):
+    __tablename__ = "student_offer"
+
+    id = Column(Integer, primary_key=True, index=True)
+    student_id = Column(Integer, ForeignKey("student.id"), nullable=True)
+    student_name = Column(String, nullable=True)  # Name snapshot / fallback
+    placement_drive_id = Column(Integer, ForeignKey("placement_drive.id"), nullable=True)
+    company = Column(String, index=True, nullable=False)
+    role = Column(String, nullable=False)
+    ctc = Column(Float, nullable=False, default=0.0)  # CTC in LPA, e.g. 14.5
+    status = Column(String, default="Accepted")  # "Offered", "Accepted", "Declined"
+    offer_letter_url = Column(String, nullable=True)
+    offered_date = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+
+    student = relationship("Student", back_populates="offers")
+    placement_drive = relationship("PlacementDrive", back_populates="offers")
+
+class InterviewMaterial(Base):
+    __tablename__ = "interview_material"
+
+    id = Column(Integer, primary_key=True, index=True)
+    company = Column(String, index=True, nullable=False)
+    title = Column(String, nullable=False)  # e.g. "Google SDE Interview Questions"
+    role = Column(String, nullable=True)
+    category = Column(String, default="Interview Questions")  # "Interview Questions", "OA Tips", "Preparation Guide"
+    content = Column(Text, nullable=True)
+    file_url = Column(String, nullable=True)
+    contributor_alumni_id = Column(Integer, ForeignKey("alumni.id"), nullable=True)
+    contributor_name = Column(String, nullable=True)  # Snapshot: e.g. "Siddharth M (Class of 2024)"
+    placement_drive_id = Column(Integer, ForeignKey("placement_drive.id"), nullable=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+
+    contributor_alumni = relationship("Alumni", back_populates="interview_materials")
+    placement_drive = relationship("PlacementDrive", back_populates="interview_materials")

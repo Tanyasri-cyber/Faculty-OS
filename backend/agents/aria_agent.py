@@ -49,9 +49,9 @@ def handle_aria_unified_agent(
     elif agent_id == "agent6":
         return handle_mentor_wellbeing_chat(message, faculty_id, db, history)
     elif agent_id == "agent7":
-        return handle_alumni_relations_chat(message, faculty_id, db, history)
-    elif agent_id == "agent8":
         return handle_placement_internships_chat(message, faculty_id, db, history)
+    elif agent_id == "agent8":
+        return handle_alumni_relations_chat(message, faculty_id, db, history)
     elif agent_id == "agent9":
         return handle_event_management_chat(message, faculty_id, db, history)
     elif agent_id == "agent10":
