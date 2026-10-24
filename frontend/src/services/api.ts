@@ -901,69 +901,174 @@ export const api = {
   // Phase 7: Placement
   async getPlacementDrives(): Promise<any[]> {
     try {
-      const stored = localStorage.getItem('placement_drives');
-      if (stored) return JSON.parse(stored);
-    } catch {}
-    return [
-      { id: 1, company: "Google", role: "Software Engineer", date: "2026-08-15", status: "Scheduled", alumni_sponsor: "Siddharth M" },
-      { id: 2, company: "Microsoft", role: "Frontend Developer", date: "2026-09-01", status: "Scheduled", alumni_sponsor: "Preethi" },
-      { id: 3, company: "Amazon", role: "Backend Developer", date: "2026-09-10", status: "Scheduled", alumni_sponsor: "Gowri F" }
-    ];
+      const response = await fetch(`${API_BASE_URL}/api/placement/drives`);
+      if (!response.ok) throw new Error(`Failed to fetch placement drives: ${response.status}`);
+      return await response.json();
+    } catch (error) {
+      console.error('getPlacementDrives error:', error);
+      return [];
+    }
   },
   async addPlacementDrive(data: any): Promise<any> {
-    try {
-      const stored = localStorage.getItem('placement_drives');
-      const list = stored ? JSON.parse(stored) : [];
-      const newItem = { id: Date.now(), company: data.company_name || data.company, role: data.job_roles || data.role, date: data.visit_date || data.date, status: data.status || 'Scheduled' };
-      list.push(newItem);
-      localStorage.setItem('placement_drives', JSON.stringify(list));
-    } catch (e) { console.error(e); }
-    return { status: 'success' };
+    const token = getAuthToken();
+    const response = await fetch(`${API_BASE_URL}/api/placement/drives`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify(data),
+    });
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.detail || `Failed to create placement drive: ${response.status}`);
+    }
+    return await response.json();
   },
   async editPlacementDrive(id: number, data: any): Promise<any> {
-    try {
-      const stored = localStorage.getItem('placement_drives');
-      if (stored) {
-        const list = JSON.parse(stored);
-        const idx = list.findIndex((x: any) => x.id === id);
-        if (idx >= 0) {
-          list[idx] = { ...list[idx], company: data.company_name || data.company, role: data.job_roles || data.role, date: data.visit_date || data.date, status: data.status || list[idx].status };
-          localStorage.setItem('placement_drives', JSON.stringify(list));
-        }
-      }
-    } catch (e) { console.error(e); }
-    return { status: 'success' };
+    const token = getAuthToken();
+    const response = await fetch(`${API_BASE_URL}/api/placement/drives/${id}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify(data),
+    });
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.detail || `Failed to update placement drive: ${response.status}`);
+    }
+    return await response.json();
+  },
+  async deletePlacementDrive(id: number): Promise<any> {
+    const token = getAuthToken();
+    const response = await fetch(`${API_BASE_URL}/api/placement/drives/${id}`, {
+      method: 'DELETE',
+      headers: {
+        ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+      },
+    });
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.detail || `Failed to delete placement drive: ${response.status}`);
+    }
+    return await response.json();
   },
   async getInternships(): Promise<any[]> {
     try {
-      const stored = localStorage.getItem('internships');
-      if (stored) return JSON.parse(stored);
-    } catch {}
-    return [];
+      const response = await fetch(`${API_BASE_URL}/api/internships`);
+      if (!response.ok) throw new Error(`Failed to fetch internships: ${response.status}`);
+      return await response.json();
+    } catch (e: any) {
+      console.error(e);
+      throw e;
+    }
   },
   async addInternship(data: any): Promise<any> {
-    try {
-      const stored = localStorage.getItem('internships');
-      const list = stored ? JSON.parse(stored) : [];
-      const newItem = { id: Date.now(), ...data };
-      list.push(newItem);
-      localStorage.setItem('internships', JSON.stringify(list));
-    } catch (e) { console.error(e); }
-    return { status: 'success' };
+    const token = localStorage.getItem('token');
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+
+    const response = await fetch(`${API_BASE_URL}/api/internships`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(data),
+    });
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.detail || `Failed to create internship: ${response.status}`);
+    }
+    return await response.json();
   },
   async editInternship(id: number, data: any): Promise<any> {
+    const token = localStorage.getItem('token');
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+
+    const response = await fetch(`${API_BASE_URL}/api/internships/${id}`, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify(data),
+    });
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.detail || `Failed to update internship: ${response.status}`);
+    }
+    return await response.json();
+  },
+  async deleteInternship(id: number): Promise<any> {
+    const token = localStorage.getItem('token');
+    const headers: Record<string, string> = {};
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+
+    const response = await fetch(`${API_BASE_URL}/api/internships/${id}`, {
+      method: 'DELETE',
+      headers,
+    });
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.detail || `Failed to delete internship: ${response.status}`);
+    }
+    return await response.json();
+  },
+
+  async getInterviewMaterials(): Promise<any[]> {
     try {
-      const stored = localStorage.getItem('internships');
-      if (stored) {
-        const list = JSON.parse(stored);
-        const idx = list.findIndex((x: any) => x.id === id);
-        if (idx >= 0) {
-          list[idx] = { ...list[idx], ...data };
-          localStorage.setItem('internships', JSON.stringify(list));
-        }
-      }
-    } catch (e) { console.error(e); }
-    return { status: 'success' };
+      const response = await fetch(`${API_BASE_URL}/api/interview-materials`);
+      if (!response.ok) throw new Error(`Failed to fetch interview materials: ${response.status}`);
+      return await response.json();
+    } catch (e: any) {
+      console.error(e);
+      throw e;
+    }
+  },
+  async addInterviewMaterial(data: any): Promise<any> {
+    const token = localStorage.getItem('token');
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+
+    const response = await fetch(`${API_BASE_URL}/api/interview-materials`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(data),
+    });
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.detail || `Failed to create interview material: ${response.status}`);
+    }
+    return await response.json();
+  },
+  async editInterviewMaterial(id: number, data: any): Promise<any> {
+    const token = localStorage.getItem('token');
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+
+    const response = await fetch(`${API_BASE_URL}/api/interview-materials/${id}`, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify(data),
+    });
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.detail || `Failed to update interview material: ${response.status}`);
+    }
+    return await response.json();
+  },
+  async deleteInterviewMaterial(id: number): Promise<any> {
+    const token = localStorage.getItem('token');
+    const headers: Record<string, string> = {};
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+
+    const response = await fetch(`${API_BASE_URL}/api/interview-materials/${id}`, {
+      method: 'DELETE',
+      headers,
+    });
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.detail || `Failed to delete interview material: ${response.status}`);
+    }
+    return await response.json();
   },
 
   // Phase 8: Alumni Relations (Agent 8)
@@ -1513,38 +1618,176 @@ export const api = {
     return { status: 'success', message: `File "${file.name}" uploaded successfully.` };
   },
 
-  async getAllResumes(): Promise<any[]> {
-    try {
-      const token = getAuthToken();
-      const headers: any = {};
-      if (token) headers['Authorization'] = `Bearer ${token}`;
+  async getAllResumes(demo = false): Promise<any[]> {
+    const token = getAuthToken();
+    const headers: any = {};
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    const url = `${API_BASE_URL}/api/resume/all${demo ? '?demo=true' : ''}`;
+    const res = await fetch(url, { headers });
+    if (!res.ok) throw new Error(`Failed to load resumes: ${res.status}`);
+    const data = await res.json();
+    return data.resumes || [];
+  },
 
-      const res = await fetch(`${API_BASE_URL}/api/resume/all`, { headers });
-      if (res.ok) {
-        const data = await res.json();
-        return data.resumes || [];
-      }
-    } catch (e) {
+  async getResumeMatchTarget(targetType: 'drive' | 'internship', targetId: number): Promise<any> {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/resume/match-target?target_type=${targetType}&target_id=${targetId}`);
+      if (!response.ok) throw new Error(`Failed to match resumes: ${response.status}`);
+      return await response.json();
+    } catch (e: any) {
       console.error(e);
+      throw e;
     }
-    return [];
+  },
+
+  async matchResumeSingle(payload: any): Promise<any> {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/resume/match`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!response.ok) throw new Error(`Failed to calculate resume match: ${response.status}`);
+      return await response.json();
+    } catch (e: any) {
+      console.error(e);
+      throw e;
+    }
+  },
+
+  async uploadResume(studentRollNo: string, file: File): Promise<{ skills: string; status: string; message: string }> {
+    const formData = new FormData();
+    formData.append('student_roll_no', studentRollNo);
+    formData.append('file', file);
+    const token = getAuthToken();
+    const headers: any = {};
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    const response = await fetch(`${API_BASE_URL}/api/resume/upload`, {
+      method: 'POST',
+      headers,
+      body: formData,
+    });
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.detail || `Upload failed: ${response.status}`);
+    }
+    return await response.json();
+  },
+
+  async bulkUploadResumes(files: FileList | File[]): Promise<any> {
+    const formData = new FormData();
+    for (let i = 0; i < files.length; i++) {
+      formData.append('files', files[i]);
+    }
+    const token = getAuthToken();
+    const headers: any = {};
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    const response = await fetch(`${API_BASE_URL}/api/resume/bulk-upload`, {
+      method: 'POST',
+      headers,
+      body: formData,
+    });
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.detail || `Bulk upload failed: ${response.status}`);
+    }
+    return await response.json();
+  },
+
+  async getCareerGuidance(studentId: number | string): Promise<any> {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/career/guidance/${studentId}`);
+      if (!response.ok) throw new Error(`Failed to fetch career guidance: ${response.status}`);
+      return await response.json();
+    } catch (e: any) {
+      console.error(e);
+      throw e;
+    }
+  },
+
+  async queryCareerAdvisor(payload: { query?: string; student_id?: number; student_name?: string; roll_no?: string }): Promise<any> {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/career/guidance`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!response.ok) throw new Error(`Failed to query career advisor: ${response.status}`);
+      return await response.json();
+    } catch (e: any) {
+      console.error(e);
+      throw e;
+    }
+  },
+
+  async getBatchCareerReadiness(query?: string): Promise<any> {
+    try {
+      const url = query ? `${API_BASE_URL}/api/career/batch-readiness?query=${encodeURIComponent(query)}` : `${API_BASE_URL}/api/career/batch-readiness`;
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`Failed to fetch batch readiness: ${response.status}`);
+      return await response.json();
+    } catch (e: any) {
+      console.error(e);
+      throw e;
+    }
   },
 
   async getStudentOffers(): Promise<any[]> {
     try {
-      const stored = localStorage.getItem('student_offers');
-      if (stored) return JSON.parse(stored);
-    } catch {}
-    return [];
+      const response = await fetch(`${API_BASE_URL}/api/offers`);
+      if (!response.ok) throw new Error(`Failed to fetch student offers: ${response.status}`);
+      return await response.json();
+    } catch (e: any) {
+      console.error(e);
+      throw e;
+    }
   },
   async addStudentOffer(data: any): Promise<any> {
-    try {
-      const stored = localStorage.getItem('student_offers');
-      const list = stored ? JSON.parse(stored) : [];
-      list.push({ id: Date.now(), ...data });
-      localStorage.setItem('student_offers', JSON.stringify(list));
-    } catch (e) { console.error(e); }
-    return { status: 'success' };
+    const token = localStorage.getItem('token');
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+
+    const response = await fetch(`${API_BASE_URL}/api/offers`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(data),
+    });
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.detail || `Failed to create student offer: ${response.status}`);
+    }
+    return await response.json();
+  },
+  async editStudentOffer(id: number, data: any): Promise<any> {
+    const token = localStorage.getItem('token');
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+
+    const response = await fetch(`${API_BASE_URL}/api/offers/${id}`, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify(data),
+    });
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.detail || `Failed to update student offer: ${response.status}`);
+    }
+    return await response.json();
+  },
+  async deleteStudentOffer(id: number): Promise<any> {
+    const token = localStorage.getItem('token');
+    const headers: Record<string, string> = {};
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+
+    const response = await fetch(`${API_BASE_URL}/api/offers/${id}`, {
+      method: 'DELETE',
+      headers,
+    });
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.detail || `Failed to delete student offer: ${response.status}`);
+    }
+    return await response.json();
   },
 
   async getAlumniJobs(): Promise<any[]> {
@@ -1596,5 +1839,123 @@ export const api = {
       localStorage.setItem('alumni_events', JSON.stringify(list));
     } catch (e) { console.error(e); }
     return { status: 'success' };
-  }
+  },
+
+  // ── Placement Namelist & Status Tracking ────────────────────────────
+
+  /**
+   * Upload a PDF / Excel / CSV namelist for server-side parsing.
+   * Returns { headers, suggested_mapping, rows, is_scanned, error }
+   */
+  async parseNamelistFile(file: File): Promise<{
+    headers: string[];
+    suggested_mapping: Record<string, string>;
+    rows: Record<string, string>[];
+    is_scanned: boolean;
+    error: string | null;
+  }> {
+    const formData = new FormData();
+    formData.append('file', file);
+    const resp = await fetch(`${API_BASE_URL}/api/placement/namelist/parse`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${getAuthToken()}` },
+      body: formData,
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({ detail: resp.statusText }));
+      throw new Error(err.detail || 'Failed to parse namelist');
+    }
+    return resp.json();
+  },
+
+  /**
+   * Import mapped rows into the database (upsert by roll_no / register_no).
+   * Returns { imported, skipped, duplicates }
+   */
+  async importNamelistStudents(
+    rows: Record<string, string>[],
+    mapping: Record<string, string>,
+    replaceExisting: boolean = false,
+  ): Promise<{ imported: number; skipped: number; duplicates: number }> {
+    const resp = await fetch(`${API_BASE_URL}/api/placement/namelist/import`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${getAuthToken()}`,
+      },
+      body: JSON.stringify({ rows, mapping, replace_existing: replaceExisting }),
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({ detail: resp.statusText }));
+      throw new Error(err.detail || 'Import failed');
+    }
+    return resp.json();
+  },
+
+  /** Fetch all students with their placement status. Supports search and status_filter query params. */
+  async getPlacementStudents(params?: { search?: string; status_filter?: string }): Promise<PlacementStudent[]> {
+    const qs = new URLSearchParams();
+    if (params?.search) qs.set('search', params.search);
+    if (params?.status_filter) qs.set('status_filter', params.status_filter);
+    const resp = await fetch(`${API_BASE_URL}/api/placement/students?${qs.toString()}`, {
+      headers: { Authorization: `Bearer ${getAuthToken()}` },
+    });
+    if (!resp.ok) throw new Error('Failed to fetch placement students');
+    return resp.json();
+  },
+
+  /** Remove a student from placement tracking. */
+  async deletePlacementStudent(studentId: number): Promise<{ status: string; message: string }> {
+    const resp = await fetch(`${API_BASE_URL}/api/placement/students/${studentId}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${getAuthToken()}` },
+    });
+    if (!resp.ok) throw new Error('Failed to delete student from placement tracking');
+    return resp.json();
+  },
+
+  /** Clear all students from active placement tracking. */
+  async clearAllPlacementStudents(): Promise<{ status: string; cleared: number }> {
+    const resp = await fetch(`${API_BASE_URL}/api/placement/students/clear`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${getAuthToken()}` },
+    });
+    if (!resp.ok) throw new Error('Failed to clear placement students');
+    return resp.json();
+  },
+
+  /** Update a student's placement status in the database. */
+  async updateStudentPlacementStatus(
+    studentId: number,
+    status: PlacementStatus,
+  ): Promise<{ id: number; roll_no: string; name: string; placement_status: string }> {
+    const resp = await fetch(`${API_BASE_URL}/api/placement/students/${studentId}/status`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${getAuthToken()}`,
+      },
+      body: JSON.stringify({ status }),
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({ detail: resp.statusText }));
+      throw new Error(err.detail || 'Failed to update status');
+    }
+    return resp.json();
+  },
 };
+
+// ── Shared placement types ────────────────────────────────────────────────────
+export type PlacementStatus = 'Not Started' | 'Not Placed' | 'Placed' | 'Internship' | 'In Progress';
+
+export interface PlacementStudent {
+  id: number;
+  roll_no: string;
+  register_no: string | null;
+  name: string;
+  department: string;
+  batch: string;
+  placement_status: PlacementStatus;
+  email: string;
+}
+
