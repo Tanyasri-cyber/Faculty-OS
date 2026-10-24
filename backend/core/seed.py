@@ -4,7 +4,9 @@ from .models import (
     AttendanceRecord, Assignment, Submission, InternalMark,
     COAttainment, FacultyWorkload, Publication, GrantOpportunity,
     ResearchDeadline, QuestionBankItem, QuestionPaper, Rubric,
-    Mentee, CheckIn, Escalation
+    Mentee, CheckIn, Escalation,
+    Alumni, AlumniInteraction, AlumniMentorship, AlumniEvent,
+    AlumniContribution, AlumniFollowUpTask
 )
 from .database import engine, Base
 from .auth import get_password_hash
@@ -24,6 +26,7 @@ def seed_database(db: Session):
         internal_marks_count = db.query(InternalMark).count()
         if internal_marks_count > 0:
             print("Database already seeded with full 6-agent MVP data.")
+            seed_alumni_data(db)
             seed_rag_policies(db)
             return
 
@@ -528,6 +531,8 @@ def seed_database(db: Session):
     db.commit()
     print("Database seeded successfully with all tables!")
 
+    seed_alumni_data(db)
+
     # Ingest text into RAG
     seed_rag_policies(db)
 
@@ -644,3 +649,528 @@ def seed_rag_policies(db: Session):
                 source_name=policy_doc.file_path
             )
     print("RAG seeding complete.")
+
+
+def seed_alumni_data(db: Session):
+    if db.query(Alumni).count() > 0:
+        return
+
+    print("Seeding Alumni Relations module records...")
+    demo_faculty = db.query(Faculty).first()
+    faculty_id = demo_faculty.id if demo_faculty else 1
+
+    alumni_list = [
+        Alumni(
+            name="Siddharth Madhavan",
+            email="siddharth.m@google.com",
+            phone="+91 98401 23456",
+            graduation_year=2020,
+            degree="B.Tech",
+            department="CSE",
+            current_company="Google",
+            designation="Senior Software Engineer",
+            industry="Cloud & Distributed Systems",
+            location="Bengaluru, Karnataka",
+            skills="Go, Kubernetes, Distributed Systems, Microservices, GCP, Cloud Architecture",
+            linkedin_url="https://linkedin.com/in/siddharth-m-cloud",
+            avatar_url="https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150",
+            mentorship_available=True,
+            mentorship_topics="Distributed Systems, Cloud Architecture, Google SDE Interviews",
+            willing_to_refer=True,
+            willing_guest_lectures=True,
+            engagement_status="Active",
+            engagement_score=94,
+            last_interaction_date="2026-09-18",
+            consent_status="Opt-in"
+        ),
+        Alumni(
+            name="Priya Ramakrishnan",
+            email="priya.r@microsoft.com",
+            phone="+91 94441 87654",
+            graduation_year=2021,
+            degree="B.Tech",
+            department="CCE",
+            current_company="Microsoft",
+            designation="Software Engineer II",
+            industry="Enterprise Software & AI",
+            location="Hyderabad, Telangana",
+            skills="C#, .NET Core, Azure DevOps, LLM Integration, React, TypeScript",
+            linkedin_url="https://linkedin.com/in/priya-ram-msft",
+            avatar_url="https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=150",
+            mentorship_available=True,
+            mentorship_topics="Azure Cloud, Fullstack .NET, Women in Tech Mentorship",
+            willing_to_refer=True,
+            willing_guest_lectures=True,
+            engagement_status="Active",
+            engagement_score=88,
+            last_interaction_date="2026-10-02",
+            consent_status="Opt-in"
+        ),
+        Alumni(
+            name="Gowri Shankar",
+            email="gowrishankar@amazon.com",
+            phone="+91 97910 54321",
+            graduation_year=2019,
+            degree="B.Tech",
+            department="CSE",
+            current_company="Amazon",
+            designation="Solutions Architect Lead",
+            industry="E-Commerce & AWS",
+            location="Chennai, Tamil Nadu",
+            skills="AWS Solutions, Serverless, DynamoDB, Python, High-Scale Architecture",
+            linkedin_url="https://linkedin.com/in/gowri-shankar-aws",
+            avatar_url="https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150",
+            mentorship_available=True,
+            mentorship_topics="AWS Certification, System Design, Solution Architecture",
+            willing_to_refer=True,
+            willing_guest_lectures=True,
+            engagement_status="Active",
+            engagement_score=91,
+            last_interaction_date="2026-08-15",
+            consent_status="Opt-in"
+        ),
+        Alumni(
+            name="Karthik Venkatesh",
+            email="karthik.v@zoho.com",
+            phone="+91 98840 99887",
+            graduation_year=2022,
+            degree="B.Tech",
+            department="IT",
+            current_company="Zoho Corp",
+            designation="Lead Product Engineer",
+            industry="SaaS & Cloud Applications",
+            location="Chennai, Tamil Nadu",
+            skills="Java, Spring Boot, PostgreSQL, Microservices, Redis, SaaS Architecture",
+            linkedin_url="https://linkedin.com/in/karthik-venkat-zoho",
+            avatar_url="https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150",
+            mentorship_available=True,
+            mentorship_topics="Product Engineering, Database Scaling, Startup Culture",
+            willing_to_refer=True,
+            willing_guest_lectures=False,
+            engagement_status="Active",
+            engagement_score=82,
+            last_interaction_date="2026-09-24",
+            consent_status="Opt-in"
+        ),
+        Alumni(
+            name="Ananya Sundaram",
+            email="ananya.sundar@nvidia.com",
+            phone="+91 99400 11223",
+            graduation_year=2018,
+            degree="M.Tech",
+            department="ECE",
+            current_company="NVIDIA",
+            designation="Senior AI Hardware Engineer",
+            industry="Semiconductor & Accelerated Computing",
+            location="Bengaluru, Karnataka",
+            skills="CUDA, GPU Optimization, PyTorch, Deep Learning, VLSI, Computer Vision",
+            linkedin_url="https://linkedin.com/in/ananya-sundaram-ai",
+            avatar_url="https://images.unsplash.com/photo-1580489944761-15a19d654956?w=150",
+            mentorship_available=True,
+            mentorship_topics="CUDA Programming, AI Research Careers, VLSI Design",
+            willing_to_refer=True,
+            willing_guest_lectures=True,
+            engagement_status="Active",
+            engagement_score=95,
+            last_interaction_date="2026-10-10",
+            consent_status="Opt-in"
+        ),
+        Alumni(
+            name="Varun Natarajan",
+            email="varun.nat@razorpay.com",
+            phone="+91 97890 33445",
+            graduation_year=2023,
+            degree="B.Tech",
+            department="CSE",
+            current_company="Razorpay",
+            designation="Fintech Software Engineer",
+            industry="Fintech & Payments",
+            location="Bengaluru, Karnataka",
+            skills="Golang, Kafka, High-Frequency Transactions, Docker, Redis",
+            linkedin_url="https://linkedin.com/in/varun-natarajan-fintech",
+            avatar_url="https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?w=150",
+            mentorship_available=False,
+            mentorship_topics="Fintech Systems, Transaction Processing",
+            willing_to_refer=True,
+            willing_guest_lectures=False,
+            engagement_status="Requires Follow-up",
+            engagement_score=68,
+            last_interaction_date="2026-06-12",
+            consent_status="Opt-in"
+        ),
+        Alumni(
+            name="Deepa Balasubramanian",
+            email="deepa.bala@cisco.com",
+            phone="+91 94450 77665",
+            graduation_year=2019,
+            degree="B.Tech",
+            department="CCE",
+            current_company="Cisco Systems",
+            designation="Network Security Specialist",
+            industry="Cybersecurity & Networking",
+            location="Chennai, Tamil Nadu",
+            skills="Network Protocols, Cyber Security, Wireshark, Zero Trust, Python",
+            linkedin_url="https://linkedin.com/in/deepa-balasubramanian-cisco",
+            avatar_url="https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=150",
+            mentorship_available=True,
+            mentorship_topics="Cybersecurity certifications, Ethical Hacking, Cisco Routing",
+            willing_to_refer=True,
+            willing_guest_lectures=True,
+            engagement_status="Active",
+            engagement_score=85,
+            last_interaction_date="2026-09-05",
+            consent_status="Opt-in"
+        ),
+        Alumni(
+            name="Rohan Sethuraman",
+            email="rohan.sethu@morganstanley.com",
+            phone="+91 98410 44332",
+            graduation_year=2021,
+            degree="B.Tech",
+            department="IT",
+            current_company="Morgan Stanley",
+            designation="Quant Technology Associate",
+            industry="Investment Banking & Algorithmic Trading",
+            location="Mumbai, Maharashtra",
+            skills="C++, Python, Algorithmic Trading, Low Latency, Time Series Analytics",
+            linkedin_url="https://linkedin.com/in/rohan-sethu-quant",
+            avatar_url="https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=150",
+            mentorship_available=True,
+            mentorship_topics="Financial Engineering, Quant Prep, C++ Low-Latency",
+            willing_to_refer=False,
+            willing_guest_lectures=True,
+            engagement_status="Active",
+            engagement_score=78,
+            last_interaction_date="2026-07-20",
+            consent_status="Transactional Only"
+        ),
+        Alumni(
+            name="Meera Chandrasekaran",
+            email="meera.c@tesla.com",
+            phone="+1 510 555 0192",
+            graduation_year=2018,
+            degree="M.Tech",
+            department="MECH",
+            current_company="Tesla Motors",
+            designation="Senior Autopilot Validation Engineer",
+            industry="Automotive & Robotics",
+            location="Palo Alto, California, USA",
+            skills="Computer Vision, ROS, Embedded C++, Sensor Fusion, Robotics",
+            linkedin_url="https://linkedin.com/in/meera-chandra-tesla",
+            avatar_url="https://images.unsplash.com/photo-1567532939604-b6b5b0db2604?w=150",
+            mentorship_available=True,
+            mentorship_topics="Autonomous Vehicles, International MS/PhD Applications, Robotics",
+            willing_to_refer=True,
+            willing_guest_lectures=True,
+            engagement_status="Active",
+            engagement_score=92,
+            last_interaction_date="2026-09-29",
+            consent_status="Opt-in"
+        ),
+        Alumni(
+            name="Aditya Krishnan",
+            email="aditya.k@freshworks.com",
+            phone="+91 97900 88776",
+            graduation_year=2024,
+            degree="B.Tech",
+            department="CSE",
+            current_company="Freshworks",
+            designation="Associate Product Manager",
+            industry="SaaS & Product Strategy",
+            location="Chennai, Tamil Nadu",
+            skills="Product Roadmap, User Research, Wireframing, SQL, A/B Testing",
+            linkedin_url="https://linkedin.com/in/aditya-krishnan-apm",
+            avatar_url="https://images.unsplash.com/photo-1522075469751-3a6694fb2f61?w=150",
+            mentorship_available=True,
+            mentorship_topics="APM Roles, Breaking into Product Management, Campus to Corporate",
+            willing_to_refer=True,
+            willing_guest_lectures=True,
+            engagement_status="Newly Registered",
+            engagement_score=70,
+            last_interaction_date="2026-10-15",
+            consent_status="Opt-in"
+        ),
+        Alumni(
+            name="Naveen Rajan",
+            email="naveen.rajan@uber.com",
+            phone="+91 98841 22334",
+            graduation_year=2017,
+            degree="B.Tech",
+            department="CSE",
+            current_company="Uber",
+            designation="Staff Infrastructure Engineer",
+            industry="Ride Sharing & Mobility",
+            location="Bengaluru, Karnataka",
+            skills="Distributed Storage, Linux Kernels, Apache Spark, Golang, Cassandra",
+            linkedin_url="https://linkedin.com/in/naveen-rajan-uber",
+            avatar_url="https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150",
+            mentorship_available=False,
+            mentorship_topics="Staff Engineering Path, Large Scale Infrastructure",
+            willing_to_refer=True,
+            willing_guest_lectures=False,
+            engagement_status="Inactive",
+            engagement_score=45,
+            last_interaction_date="2025-11-10",
+            consent_status="Opt-in"
+        )
+    ]
+
+    for a in alumni_list:
+        db.add(a)
+    db.commit()
+    for a in alumni_list:
+        db.refresh(a)
+
+    # Interactions
+    interactions = [
+        AlumniInteraction(
+            alumni_id=alumni_list[0].id,
+            faculty_id=faculty_id,
+            interaction_type="Guest Lecture",
+            date="2026-09-18",
+            summary="Delivered keynote on 'Building Scalable Cloud Infrastructure on Kubernetes' for 140 3rd-year CSE students.",
+            outcome="Completed"
+        ),
+        AlumniInteraction(
+            alumni_id=alumni_list[1].id,
+            faculty_id=faculty_id,
+            interaction_type="Mentorship",
+            date="2026-10-02",
+            summary="Agreed to mentor 3 final-year CCE female candidates for Microsoft Aspire program.",
+            outcome="Positive"
+        ),
+        AlumniInteraction(
+            alumni_id=alumni_list[2].id,
+            faculty_id=faculty_id,
+            interaction_type="Meeting",
+            date="2026-08-15",
+            summary="Discussed sponsoring department cloud lab credits through AWS Educate.",
+            outcome="Follow-up Required"
+        ),
+        AlumniInteraction(
+            alumni_id=alumni_list[4].id,
+            faculty_id=faculty_id,
+            interaction_type="Campus Visit",
+            date="2026-10-10",
+            summary="Visited AI/Deep Learning lab, reviewed 6 student capstone projects on computer vision.",
+            outcome="Completed"
+        )
+    ]
+    for inter in interactions:
+        db.add(inter)
+
+    # Mentorships
+    mentorships = [
+        AlumniMentorship(
+            alumni_id=alumni_list[0].id,
+            student_name="Rahul Varma",
+            student_roll_no="22CSE045",
+            student_department="CSE",
+            topic="Distributed Systems & Mock Interview for Google",
+            request_date="2026-09-25",
+            status="Accepted",
+            goals="Review resume, conduct mock system design session on rate limiter architecture",
+            meeting_link="https://meet.google.com/xyz-alumni-mentorship",
+            session_notes="Initial intro call completed. Student showed strong algorithmic foundations.",
+            feedback_rating=5,
+            feedback_text="Siddharth provided actionable tips on scalable API design and clean code practices."
+        ),
+        AlumniMentorship(
+            alumni_id=alumni_list[1].id,
+            student_name="Sneha Murugan",
+            student_roll_no="22CCE012",
+            student_department="CCE",
+            topic="Fullstack Web Development & Azure Cloud Certification",
+            request_date="2026-10-05",
+            status="Accepted",
+            goals="Guidance on AZ-900 and building production-ready microfrontends",
+            meeting_link="https://teams.microsoft.com/l/meetup-join/12345",
+            session_notes="Discussed Azure DevOps CI/CD pipelines and student's capstone repository.",
+            feedback_rating=5,
+            feedback_text="Priya was extremely supportive and walked through real corporate code review practices."
+        ),
+        AlumniMentorship(
+            alumni_id=alumni_list[4].id,
+            student_name="Aravind Balaji",
+            student_roll_no="22ECE031",
+            student_department="ECE",
+            topic="CUDA Acceleration & GPU Tensor Processing",
+            request_date="2026-10-12",
+            status="Pending",
+            goals="Seeking advice on optimizing matrix multiplication kernels using CUDA C++",
+            meeting_link="",
+            session_notes="",
+            feedback_rating=None,
+            feedback_text=""
+        ),
+        AlumniMentorship(
+            alumni_id=alumni_list[9].id,
+            student_name="Kavya Sundar",
+            student_roll_no="22CSE088",
+            student_department="CSE",
+            topic="Associate Product Manager (APM) Career Prep",
+            request_date="2026-10-16",
+            status="Pending",
+            goals="Understand product case studies and resume tailoring for SaaS companies",
+            meeting_link="",
+            session_notes="",
+            feedback_rating=None,
+            feedback_text=""
+        )
+    ]
+    for m in mentorships:
+        db.add(m)
+
+    # Events
+    events = [
+        AlumniEvent(
+            title="Tech Symposium: Distributed Cloud Architecture at Scale",
+            event_type="Guest Lecture",
+            date="2026-11-08",
+            time="10:30 AM - 12:30 PM",
+            venue="Seminar Hall 1 & Live Stream",
+            target_audience="3rd & 4th Year CSE/CCE/IT Students",
+            coordinator_name="Dr. Preethi R",
+            alumni_speaker_id=alumni_list[0].id,
+            alumni_speaker_name="Siddharth Madhavan",
+            status="Upcoming",
+            expected_attendees=160,
+            actual_attendees=0,
+            description="Deep-dive into microservices resilience, service meshes, and distributed consensus algorithms implemented in hyper-scale cloud providers.",
+            feedback_summary=""
+        ),
+        AlumniEvent(
+            title="Annual Alumni Homecoming & Institutional Networking Summit 2026",
+            event_type="Alumni Reunion",
+            date="2026-12-19",
+            time="09:00 AM - 05:00 PM",
+            venue="University Auditorium & Campus Grounds",
+            target_audience="All Batches (2015-2025), Faculty, Student Council",
+            coordinator_name="Alumni Relations Office",
+            alumni_speaker_id=None,
+            alumni_speaker_name="Distinguished Alumni Panel",
+            status="Upcoming",
+            expected_attendees=450,
+            actual_attendees=0,
+            description="Institutional gala connecting distinguished graduates, faculty mentors, incubation startups, and current student innovators.",
+            feedback_summary=""
+        ),
+        AlumniEvent(
+            title="AI & Hardware Co-Design: From Silicon to Transformer Models",
+            event_type="Industry Workshop",
+            date="2026-10-10",
+            time="02:00 PM - 05:00 PM",
+            venue="VLSI Centre of Excellence, Lab 4",
+            target_audience="M.Tech & Final Year B.Tech ECE/CSE",
+            coordinator_name="Prof. Sundaram",
+            alumni_speaker_id=alumni_list[4].id,
+            alumni_speaker_name="Ananya Sundaram",
+            status="Completed",
+            expected_attendees=80,
+            actual_attendees=76,
+            description="Interactive hands-on session on GPU kernel profiling and memory bandwidth bottlenecks for LLM inference.",
+            feedback_summary="98% rated excellent. Students requested follow-up hands-on hackathon."
+        )
+    ]
+    for ev in events:
+        db.add(ev)
+
+    # Contributions
+    contributions = [
+        AlumniContribution(
+            alumni_id=alumni_list[0].id,
+            alumni_name="Siddharth Madhavan",
+            category="Financial/Scholarship",
+            amount=150000.0,
+            description="Endowed Merit-cum-Means Scholarship fund for 3 economically underprivileged computer science students.",
+            date="2026-08-20",
+            status="Approved",
+            verified_by="Dean of Student Affairs",
+            impact_summary="Sponsored tuition fee and laptop allowance for 3 second-year scholars."
+        ),
+        AlumniContribution(
+            alumni_id=alumni_list[4].id,
+            alumni_name="Ananya Sundaram",
+            category="Lab Equipment/Sponsorship",
+            amount=280000.0,
+            description="Facilitated donation of 2 high-performance NVIDIA RTX workstations for AI student research lab.",
+            date="2026-09-12",
+            status="Approved",
+            verified_by="HOD CSE",
+            impact_summary="Installed in Lab 4; currently supporting 8 graduate research projects on medical image synthesis."
+        ),
+        AlumniContribution(
+            alumni_id=alumni_list[2].id,
+            alumni_name="Gowri Shankar",
+            category="Internship/Placement Referral",
+            amount=0.0,
+            description="Offered 8 priority interview referrals for AWS Solutions Architecture internship batch 2026-27.",
+            date="2026-09-28",
+            status="Approved",
+            verified_by="Placement Officer",
+            impact_summary="5 students successfully cleared preliminary screening and are in final rounds."
+        ),
+        AlumniContribution(
+            alumni_id=alumni_list[1].id,
+            alumni_name="Priya Ramakrishnan",
+            category="Mentoring Hours",
+            amount=0.0,
+            description="Volunteered 20 hours of 1-on-1 career coaching and technical resume reviews for female engineers.",
+            date="2026-10-02",
+            status="Completed",
+            verified_by="Faculty Mentor Lead",
+            impact_summary="Coached 6 mentees; 2 secured summer internships at Microsoft and Cisco."
+        )
+    ]
+    for c in contributions:
+        db.add(c)
+
+    # Follow-up tasks
+    follow_ups = [
+        AlumniFollowUpTask(
+            alumni_id=alumni_list[0].id,
+            alumni_name="Siddharth Madhavan",
+            assigned_to="Dr. Preethi R",
+            title="Finalize presentation slides and audio-visual check for Cloud Architecture symposium",
+            due_date="2026-11-04",
+            priority="High",
+            status="Pending",
+            notes="Send auditorium technical specs and Zoom link for remote hybrid participants."
+        ),
+        AlumniFollowUpTask(
+            alumni_id=alumni_list[2].id,
+            alumni_name="Gowri Shankar",
+            assigned_to="Prof. K. Venkatesh",
+            title="Follow-up on AWS Educate cloud lab credits approval",
+            due_date="2026-10-30",
+            priority="Medium",
+            status="In Progress",
+            notes="Institutional application submitted on portal; awaiting verification ticket confirmation."
+        ),
+        AlumniFollowUpTask(
+            alumni_id=alumni_list[5].id,
+            alumni_name="Varun Natarajan",
+            assigned_to="Placement Coordinator",
+            title="Re-engage for Razorpay campus hiring drive & mock technical interview panel",
+            due_date="2026-10-25",
+            priority="High",
+            status="Overdue",
+            notes="Last contacted in June 2026; need to re-verify current corporate contact details and campus drive dates."
+        ),
+        AlumniFollowUpTask(
+            alumni_id=alumni_list[3].id,
+            alumni_name="Karthik Venkatesh",
+            assigned_to="Dr. Preethi R",
+            title="Draft departmental MoU with Zoho Corp for student incubation and product internships",
+            due_date="2026-11-15",
+            priority="Medium",
+            status="Pending",
+            notes="Karthik offered to connect our incubation center with Zoho University Relations."
+        )
+    ]
+    for f in follow_ups:
+        db.add(f)
+
+    db.commit()
+    print("Alumni Relations seeding complete with 11 alumni, interactions, mentorships, events, contributions, and follow-ups.")
+

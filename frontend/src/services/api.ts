@@ -196,9 +196,62 @@ export const api = {
           subject: "Design & Analysis of Algorithms"
         };
         toolCalls = [{ name: 'generate_question_paper', status: 'success', result: `Generated ${generatedQuestions.length} questions.` }];
+      } else if (agentId === 'agent6') {
+        if (msgLower.includes('critical') || msgLower.includes('warning') || msgLower.includes('cohort') || msgLower.includes('summary') || msgLower.includes('distribution')) {
+          toolCalls = [{ name: 'analyze_cohort_wellbeing', status: 'success', result: 'Processed cohort wellbeing metrics across 5 tiers.' }];
+          richData = { type: 'cohort_wellbeing_summary' };
+          mockReply = "### 🌸 Cohort Wellbeing Intelligence Summary\n\n- **🚨 Critical (0-29)**: 1 student (A. Kumar, Score 24/100, Attendance 68%)\n- **😟 Needs Attention (30-49)**: 1 student (C. Dinesh, Score 42/100)\n- **😐 Average (50-69)**: 2 students\n- **🙂 Good (70-89)**: 3 students\n- **😊 Excellent (90-100)**: 1 student\n\n**Action Advice:** Immediate outreach recommended for A. Kumar. You can use 'Suggest Prompt' to start an empathetic conversation.";
+        } else if (msgLower.includes('prompt') || msgLower.includes('starter') || msgLower.includes('suggest') || msgLower.includes('how to talk') || msgLower.includes('message')) {
+          toolCalls = [{ name: 'generate_empathy_prompt', status: 'success', result: 'Crafted 2 empathetic conversation starters.' }];
+          richData = { type: 'checkin_prompts' };
+          mockReply = "### 💬 Empathetic Conversation Starters\n\n**Option 1: Supportive Non-Threatening Nudge (Recommended)**\n> *\"Hi Kumar, I was reviewing our mentee check-ins and wanted to see how you're feeling this week. I noticed classes have been demanding lately—is everything going okay with your health, hostel, or studies? Let me know when you're free for a casual 10-minute catchup; I'm here to support you.\"*\n\n**Option 2: Gentle Academic Check-in**\n> *\"Hello Kumar, hope you're having a good week. I noticed your attendance dipped in recent DAA lectures. Let's sit together tomorrow during my counseling hour to sort out any hurdles before internal assessments.\"*";
+        } else if (msgLower.includes('escalat') || msgLower.includes('refer') || msgLower.includes('counsel') || msgLower.includes('crisis')) {
+          toolCalls = [{ name: 'prepare_counseling_referral', status: 'success', result: 'Drafted confidential counseling referral brief.' }];
+          richData = { type: 'escalation_memo' };
+          mockReply = "### 🚨 Confidential Counseling Referral Memo\n\n**To:** Head of Student Counseling / Academic Advisory Committee\n**Mentee:** A. Kumar (`2024CS001`)\n**Status:** Urgent Intervention Recommended (Tier 1)\n\n**Observed Risk Indicators:**\n- Cumulative wellbeing score dropped to 24/100 (Critical).\n- Persistent absenteeism in core modules and emotional distress signaled in previous check-in.\n\n**Recommended Step:** Scheduled confidential 1-on-1 counseling session with campus clinical counselor under NAAC Criterion 5 privacy guidelines.";
+        } else if (msgLower.includes('dossier') || msgLower.includes('naac') || msgLower.includes('nba') || msgLower.includes('criterion 5')) {
+          toolCalls = [{ name: 'generate_naac_mentoring_dossier', status: 'success', result: 'Compiled NAAC Criterion 5.1.4 Dossier.' }];
+          richData = { type: 'naac_dossier' };
+          mockReply = "### 📑 NAAC Criterion 5.1.4 Mentoring Compliance Dossier\n\n- **Mentor-Mentee Ratio:** 1:8\n- **Total Check-in Touchpoints Logged:** 24 sessions\n- **At-Risk Identification Rate:** 100% early triage\n- **Attendance Recovery Index:** 84.6% recovered required >75% attendance within 4 weeks.\n\n✅ *All records, check-in dates, and faculty signatures comply with NAAC SSR Criterion 5.*";
+        } else {
+          mockReply = "🌸 Hello! I am your **Mentor & Wellbeing Advisor** (Agent 6). I can help you evaluate student risk, draft empathetic check-in prompts, summarize raw meeting notes, or prepare confidential counseling referrals.";
+        }
+      } else if (agentId === 'agent9') {
+        if (msgLower.includes('approve') || msgLower.includes('confirm event')) {
+          toolCalls = [{ name: 'approve_event_plan', status: 'success', result: 'Created event and 8 committee tasks.' }];
+          richData = { type: 'event_approved' };
+          mockReply = "### ✅ Event Plan Approved & Created Successfully!\n\n**Event:** One-Day AI Hands-on Workshop\n- **Date:** 2026-11-15 | **Venue:** Main Auditorium & Lab 3\n- **Expected Attendees:** 150 | **Allocated Budget:** ₹42,000\n\n#### 📋 8 Committee Tasks Created:\n1. **Venue Booking & Stage Setup** → Prof. Vance (`Completed`)\n2. **Keynote Speaker Liaison** → Dr. S. Sharma (`Due: 25 Oct`)\n3. **Registration Portal & Posters** → Prof. Priya (`Due: 01 Nov`)\n4. **Catering & High-Tea** → Prof. Rajesh (`Due: 08 Nov`)\n5. **AV & Lab Systems Check** → Prof. Preethi R (`Due: 12 Nov`)\n6. **Certificates & Mementos** → Prof. Arul (`Due: 13 Nov`)\n7. **Attendance & Feedback QR** → Prof. Priya (`Due: 15 Nov`)\n8. **Post-Event Report Compilation** → Prof. Arul (`Due: 17 Nov`)\n\n*The event and committee tasks have been added to your calendar and task checklist.*";
+        } else if (msgLower.includes('plan') || msgLower.includes('workshop') || msgLower.includes('fdp') || msgLower.includes('symposium') || msgLower.includes('conference')) {
+          toolCalls = [{ name: 'generate_draft_event_plan', status: 'success', result: 'Drafted 1-day AI workshop operational blueprint.' }];
+          richData = { type: 'draft_event_plan', plan: { title: 'One-Day AI Hands-on Workshop', type: 'Workshop', date: '2026-11-15', participants: 150, budget: 42000 } };
+          mockReply = "### 📋 Draft Event Operations Plan: **One-Day AI Hands-on Workshop**\n\n**Type:** Workshop | **Duration:** 1 Day | **Target Date:** `2026-11-15`\n**Expected Participants:** 150 | **Venue:** Main Auditorium & CS Lab 3\n\n#### 💰 Estimated Budget Breakdown:\n- 🍱 Catering & Working Lunch (150 pax @ ₹160): **₹24,000**\n- 🎤 Keynote Speaker Honorarium & Travel: **₹10,000**\n- 🔊 AV Equipment & Seminar Hall: **₹4,000**\n- 📜 Participant Kits & Certificates: **₹4,000**\n**Total Estimated Budget:** **₹42,000**\n\n#### 👥 Recommended Committee Assignments:\n- **Venue & AV Setup:** Prof. Vance\n- **Speaker Liaison:** Dr. S. Sharma\n- **Registration & Media:** Prof. Priya\n- **Catering & Hospitality:** Prof. Rajesh\n- **Finance & Accounts:** Prof. Preethi R\n- **Documentation & Report:** Prof. Arul\n\n#### ⏳ Milestone Deadlines:\n- **T-30 Days:** Hall requisition & budget signoff\n- **T-21 Days:** Speaker confirmation\n- **T-14 Days:** Registration link released\n- **T-7 Days:** Final headcount to caterer\n- **T-1 Day:** AV dry run & kit assembly\n- **Event Day:** Execution & attendance\n\n👉 *Click **'Approve Plan'** below or reply `Approve plan` to create this event and all 8 tasks automatically.*";
+        } else if (msgLower.includes('risk') || msgLower.includes('overdue') || msgLower.includes('health') || msgLower.includes('monitor') || msgLower.includes('bottleneck')) {
+          toolCalls = [{ name: 'monitor_event_risks', status: 'success', result: 'Audited event health: 72/100 (Needs Attention).' }];
+          richData = { type: 'event_risk_audit', score: 72, tier: 'Needs Attention' };
+          mockReply = "### 🛡️ Event Operations Risk & Health Audit\n\n**Event:** International AI Symposium (2026-08-20)\n**Health Index:** **72/100** (🟡 **Needs Attention**)\n\n#### 🔍 Risk Factors Identified:\n- 🔴 **Speaker Confirmation Overdue by 2 days**: Dr. S. Sharma has not marked keynote confirmation completed.\n- 🟡 **Catering Burn Rate**: Catering budget is at 65% utilization.\n- 🟢 **Venue Status**: Auditorium & AV confirmed by Prof. Vance.\n\n**Recommended Immediate Action:** Send a reminder to Dr. S. Sharma regarding speaker confirmation.";
+        } else if (msgLower.includes('budget') || msgLower.includes('spent') || msgLower.includes('utilization') || msgLower.includes('financial')) {
+          toolCalls = [{ name: 'analyze_event_budget', status: 'success', result: 'Calculated budget utilization: 65% consumed.' }];
+          richData = { type: 'budget_intelligence' };
+          mockReply = "### 💰 Event Budget & Financial Intelligence\n\n**Event:** International AI Symposium 2026\n\n| Metric | Amount | Share |\n| :--- | :--- | :--- |\n| **Allocated Budget** | ₹75,000 | 100% |\n| **Actual Spent** | ₹48,750 | **65.0%** |\n| **Remaining Funds** | ₹26,250 | 35.0% |\n\n#### 📊 Category Spend:\n- 🍱 Catering & Refreshments: ₹24,000 / ₹28,000 (85% — ⚠️ Alert)\n- 🎤 Keynote Honorarium: ₹15,000 / ₹20,000 (75%)\n- 📜 Delegate Kits & Badges: ₹6,750 / ₹12,000 (56%)\n- 🔊 Hall Requisition & AV: ₹3,000 / ₹10,000 (30%)\n\n**Verdict:** Catering is burning rapidly. Reallocate ₹4,000 from AV savings to prevent overruns.";
+        } else if (msgLower.includes('speaker') || msgLower.includes('invitation') || msgLower.includes('circular') || msgLower.includes('notice') || msgLower.includes('message')) {
+          toolCalls = [{ name: 'generate_event_communication', status: 'success', result: 'Drafted formal keynote speaker invitation.' }];
+          richData = { type: 'event_communication' };
+          mockReply = "### ✉️ Formal Keynote Speaker Invitation Letter\n\n**To:** Dr. [Speaker Name], Senior Principal AI Scientist\n**From:** Department of Computer Science & Engineering\n**Subject:** Formal Invitation as Keynote Speaker for One-Day AI Workshop\n\nDear Dr. [Speaker Name],\n\nOn behalf of the Department of Computer Science & Engineering, we cordially invite you as our **Keynote Speaker** for the upcoming **\"One-Day AI Hands-on Workshop\"**, scheduled on **15th November 2026** at our **Main Auditorium**.\n\nOur audience comprises 150 eager student researchers and faculty members. We would be honored to host your 60-minute keynote on scalable deep learning architectures followed by an interactive discussion.\n\nInstitutional travel reimbursement and University honorarium will be provided. Please let us know your availability by 25th October 2026.\n\nWarm regards,\n**Dr. S. Sharma & Prof. Preethi R**\nFaculty Coordinators";
+        } else if (msgLower.includes('event day') || msgLower.includes('checklist') || msgLower.includes('tomorrow') || msgLower.includes('execution')) {
+          toolCalls = [{ name: 'get_event_day_checklist', status: 'success', result: 'Generated event-day execution schedule.' }];
+          richData = { type: 'event_day_checklist' };
+          mockReply = "### 🎯 Event-Day Operational Checklist\n\n- [x] **08:00 AM:** Hall unlocked & air conditioning active (Prof. Vance)\n- [x] **08:30 AM:** Stage AV, wireless mics & projector tested (Prof. Preethi R)\n- [ ] **09:00 AM:** Registration Desk active & delegate kits arranged (Prof. Priya)\n- [ ] **09:30 AM:** Keynote speaker received at guest lounge (Dr. S. Sharma)\n- [ ] **10:00 AM:** Inaugural lamp lighting & presidential address\n- [ ] **11:15 AM:** High-tea service in auditorium foyer (Prof. Rajesh)\n- [ ] **01:00 PM:** Lunch service & speaker hospitality\n- [ ] **04:30 PM:** Participant feedback QR displayed & certificate distribution";
+        } else if (msgLower.includes('report') || msgLower.includes('post-event') || msgLower.includes('summary')) {
+          toolCalls = [{ name: 'generate_post_event_report', status: 'success', result: 'Compiled NAAC post-event activity report.' }];
+          richData = { type: 'post_event_report' };
+          mockReply = "### 📑 Formal Post-Event Report (NAAC Criterion 6 / NBA Activity Record)\n\n**Activity Title:** International AI Symposium 2026\n**Date:** 2026-08-20 | **Venue:** Main Auditorium | **Academic Year:** 2026–2027\n\n#### 1. Key Metrics & Attendance\n- **Registered:** 152 | **Verified Attendees:** 148 (97.4%)\n- **Faculty:** 24 | **Students:** 124 | **Colleges Represented:** 8\n\n#### 2. Financial Audit\n- **Sanctioned:** ₹75,000 | **Actual Spent:** ₹48,750 | **Savings:** ₹26,250\n\n#### 3. Participant Feedback Index\n- **Overall Satisfaction:** 4.72 / 5.00 (141 responses)\n- **Recommendation for Next Edition:** Extend hands-on session time by 60 minutes.\n\n✅ *Report compiled and validated for NAAC SSR Criterion 6 upload.*";
+        } else {
+          mockReply = "Hello! I am your **Event Operations Copilot** (Agent 9). I can help you plan events, generate committee task checklists, monitor deadlines and risk scores, manage budgets, draft speaker invitations, or compile NAAC event reports.";
+        }
       } else {
         mockReply = `Hello! I am your AI assistant (${agentId}). How can I assist you today?`;
       }
+
 
       let words = mockReply.split(' ');
       let i = 0;
@@ -435,11 +488,25 @@ export const api = {
     const formData = new FormData();
     formData.append('file', file);
     formData.append('dept', dept);
+    formData.append('class_section', dept);
     formData.append('subject', subject);
-    const response = await fetch(`${API_BASE_URL}/api/attendance/upload-namelist`, {
+    
+    let response = await fetch(`${API_BASE_URL}/api/attendance/upload-namelist`, {
       method: 'POST',
       body: formData
     });
+
+    if (response.status === 404 || response.status === 405) {
+      response = await fetch(`${API_BASE_URL}/api/students/upload-namelist`, {
+        method: 'POST',
+        body: formData
+      });
+    }
+
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({ detail: 'Failed to process namelist' }));
+      throw new Error(err.detail || 'Failed to process namelist on server');
+    }
     return await response.json();
   },
 
@@ -1004,29 +1071,74 @@ export const api = {
     return await response.json();
   },
 
-  // Phase 8: Alumni
-  async getAlumniDirectory(): Promise<any[]> {
+  // Phase 8: Alumni Relations (Agent 8)
+  async getAlumniDirectory(params?: { search?: string; batch?: number; department?: string; industry?: string; company?: string; mentorship_available?: boolean; engagement_status?: string; sort_by?: string }): Promise<any[]> {
+    try {
+      const q = new URLSearchParams();
+      if (params) {
+        Object.entries(params).forEach(([k, v]) => {
+          if (v !== undefined && v !== null && v !== '' && v !== 'All') {
+            q.append(k, String(v));
+          }
+        });
+      }
+      const res = await fetch(`${API_BASE_URL}/api/alumni?${q.toString()}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data) && data.length > 0) return data;
+      }
+    } catch (e) {
+      console.warn("Backend /api/alumni unavailable, using fallback cache", e);
+    }
     try {
       const stored = localStorage.getItem('alumni_directory');
       if (stored) return JSON.parse(stored);
     } catch {}
-    return [
-      { id: 1, name: "Siddharth M", batch: "2024", company: "Google", designation: "SDE 2", willing_to_refer: true },
-      { id: 2, name: "Preethi", batch: "2023", company: "Microsoft", designation: "Frontend Engineer", willing_to_refer: true },
-      { id: 3, name: "Gowri F", batch: "2025", company: "Amazon", designation: "Backend Engineer", willing_to_refer: true }
-    ];
+    return [];
   },
+
+  async getAlumniDetail(id: number): Promise<any> {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/alumni/${id}`);
+      if (res.ok) return await res.json();
+    } catch (e) {
+      console.warn("Backend /api/alumni/:id error", e);
+    }
+    return null;
+  },
+
   async addAlumni(data: any): Promise<any> {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/alumni`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+      });
+      if (res.ok) return await res.json();
+    } catch (e) {
+      console.error(e);
+    }
     try {
       const stored = localStorage.getItem('alumni_directory');
       const list = stored ? JSON.parse(stored) : [];
-      const newItem = { id: Date.now(), ...data };
+      const newItem = { id: Date.now(), ...data, engagement_score: 75, engagement_status: "Active" };
       list.push(newItem);
       localStorage.setItem('alumni_directory', JSON.stringify(list));
-    } catch (e) { console.error(e); }
+    } catch {}
     return { status: 'success' };
   },
+
   async editAlumni(id: number, data: any): Promise<any> {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/alumni/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+      });
+      if (res.ok) return await res.json();
+    } catch (e) {
+      console.error(e);
+    }
     try {
       const stored = localStorage.getItem('alumni_directory');
       if (stored) {
@@ -1037,60 +1149,249 @@ export const api = {
           localStorage.setItem('alumni_directory', JSON.stringify(list));
         }
       }
-    } catch (e) { console.error(e); }
+    } catch {}
     return { status: 'success' };
   },
-  async getAlumniDonations(): Promise<any[]> {
+
+  async deleteAlumni(id: number): Promise<any> {
     try {
-      const stored = localStorage.getItem('alumni_donations');
+      const res = await fetch(`${API_BASE_URL}/api/alumni/${id}`, { method: 'DELETE' });
+      if (res.ok) return await res.json();
+    } catch (e) {
+      console.error(e);
+    }
+    return { status: 'success' };
+  },
+
+  async logAlumniInteraction(alumniId: number, data: any): Promise<any> {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/alumni/${alumniId}/interactions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+      });
+      if (res.ok) return await res.json();
+    } catch (e) {
+      console.error(e);
+    }
+    return { status: 'success' };
+  },
+
+  async getAlumniMentorships(status?: string): Promise<any[]> {
+    try {
+      const url = status && status !== 'All' ? `${API_BASE_URL}/api/alumni/mentorships/all?status=${status}` : `${API_BASE_URL}/api/alumni/mentorships/all`;
+      const res = await fetch(url);
+      if (res.ok) return await res.json();
+    } catch (e) {
+      console.warn("Backend /api/alumni/mentorships/all error", e);
+    }
+    try {
+      const stored = localStorage.getItem('alumni_mentorships');
       if (stored) return JSON.parse(stored);
     } catch {}
     return [];
   },
-  async addAlumniDonation(data: any): Promise<any> {
+
+  async createAlumniMentorship(data: any): Promise<any> {
     try {
-      const stored = localStorage.getItem('alumni_donations');
-      const list = stored ? JSON.parse(stored) : [];
-      const newItem = { id: Date.now(), ...data };
-      list.push(newItem);
-      localStorage.setItem('alumni_donations', JSON.stringify(list));
-    } catch (e) { console.error(e); }
+      const res = await fetch(`${API_BASE_URL}/api/alumni/mentorships`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+      });
+      if (res.ok) return await res.json();
+    } catch (e) {
+      console.error(e);
+    }
     return { status: 'success' };
   },
-  async editAlumniDonation(id: number, data: any): Promise<any> {
+
+  async updateAlumniMentorshipStatus(id: number, data: any): Promise<any> {
     try {
-      const stored = localStorage.getItem('alumni_donations');
-      if (stored) {
-        const list = JSON.parse(stored);
-        const idx = list.findIndex((x: any) => x.id === id);
-        if (idx >= 0) {
-          list[idx] = { ...list[idx], ...data };
-          localStorage.setItem('alumni_donations', JSON.stringify(list));
-        }
-      }
-    } catch (e) { console.error(e); }
+      const res = await fetch(`${API_BASE_URL}/api/alumni/mentorships/${id}/status`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+      });
+      if (res.ok) return await res.json();
+    } catch (e) {
+      console.error(e);
+    }
     return { status: 'success' };
+  },
+
+  async getAlumniContributions(): Promise<any[]> {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/alumni/contributions/all`);
+      if (res.ok) return await res.json();
+    } catch (e) {
+      console.warn("Backend /api/alumni/contributions/all error", e);
+    }
+    return [];
+  },
+
+  async addAlumniContribution(data: any): Promise<any> {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/alumni/contributions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+      });
+      if (res.ok) return await res.json();
+    } catch (e) {
+      console.error(e);
+    }
+    return { status: 'success' };
+  },
+
+  async updateAlumniContributionStatus(id: number, data: any): Promise<any> {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/alumni/contributions/${id}/status`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+      });
+      if (res.ok) return await res.json();
+    } catch (e) {
+      console.error(e);
+    }
+    return { status: 'success' };
+  },
+
+  async getAlumniFollowUps(): Promise<any[]> {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/alumni/follow-ups/all`);
+      if (res.ok) return await res.json();
+    } catch (e) {
+      console.warn("Backend /api/alumni/follow-ups/all error", e);
+    }
+    return [];
+  },
+
+  async addAlumniFollowUp(data: any): Promise<any> {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/alumni/follow-ups`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+      });
+      if (res.ok) return await res.json();
+    } catch (e) {
+      console.error(e);
+    }
+    return { status: 'success' };
+  },
+
+  async updateAlumniFollowUp(id: number, data: any): Promise<any> {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/alumni/follow-ups/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+      });
+      if (res.ok) return await res.json();
+    } catch (e) {
+      console.error(e);
+    }
+    return { status: 'success' };
+  },
+
+  async getAlumniAnalyticsSummary(): Promise<any> {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/alumni/analytics/summary`);
+      if (res.ok) return await res.json();
+    } catch (e) {
+      console.warn("Backend /api/alumni/analytics/summary error", e);
+    }
+    return null;
+  },
+
+  async getAlumniSmartRecommendations(): Promise<any[]> {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/alumni/recommendations/smart`);
+      if (res.ok) {
+        const data = await res.json();
+        return data.recommendations || [];
+      }
+    } catch (e) {
+      console.warn("Backend /api/alumni/recommendations/smart error", e);
+    }
+    return [];
+  },
+
+  async matchAlumni(data: { type: string; skills: string[]; department?: string; topic?: string }): Promise<any[]> {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/alumni/match`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+      });
+      if (res.ok) {
+        const d = await res.json();
+        return d.matches || [];
+      }
+    } catch (e) {
+      console.error("Match alumni error", e);
+    }
+    return [];
+  },
+
+  async getAlumniDonations(): Promise<any[]> {
+    return this.getAlumniContributions();
+  },
+  async addAlumniDonation(data: any): Promise<any> {
+    return this.addAlumniContribution(data);
+  },
+  async editAlumniDonation(id: number, data: any): Promise<any> {
+    return this.updateAlumniContributionStatus(id, data);
   },
 
   // Phase 9: Events
   async getEvents(): Promise<any[]> {
     try {
+      const res = await fetch(`${API_BASE_URL}/api/events`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.length > 0) return data;
+      }
+    } catch {}
+    try {
       const stored = localStorage.getItem('events');
       if (stored) return JSON.parse(stored);
     } catch {}
-    return [{ id: 1, title: "International AI Symposium", date: "2026-08-20", venue: "Auditorium" }];
+    return [
+      { id: 1, title: "International AI Symposium 2026", name: "International AI Symposium 2026", type: "Symposium", date: "2026-08-20", venue: "Main Auditorium", organizer: "CSE Department", expected_participants: 250, allocated_budget: 75000, spent_budget: 48750, health_score: 72, health_tier: "Needs Attention" },
+      { id: 2, title: "FDP on Cloud & Distributed Computing", name: "FDP on Cloud & Distributed Computing", type: "FDP", date: "2026-09-15", venue: "Seminar Hall B", organizer: "CCE Department", expected_participants: 80, allocated_budget: 35000, spent_budget: 12000, health_score: 85, health_tier: "Healthy" },
+      { id: 3, title: "Hands-on Workshop: Edge AI & IoT", name: "Hands-on Workshop: Edge AI & IoT", type: "Workshop", date: "2026-10-10", venue: "Lab 3 & LH-201", organizer: "CSE Department", expected_participants: 120, allocated_budget: 45000, spent_budget: 0, health_score: 80, health_tier: "Healthy" }
+    ];
   },
   async addEvent(data: any): Promise<any> {
     try {
+      const res = await fetch(`${API_BASE_URL}/api/events`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+      });
+      if (res.ok) return await res.json();
+    } catch {}
+    try {
       const stored = localStorage.getItem('events');
-      const list = stored ? JSON.parse(stored) : [{ id: 1, title: "International AI Symposium", date: "2026-08-20", venue: "Auditorium" }];
-      const newItem = { id: Date.now(), ...data };
-      list.push(newItem);
+      const list = stored ? JSON.parse(stored) : [];
+      const newItem = { id: Date.now(), health_score: 85, health_tier: "Healthy", ...data };
+      list.unshift(newItem);
       localStorage.setItem('events', JSON.stringify(list));
     } catch (e) { console.error(e); }
     return { status: 'success' };
   },
   async editEvent(id: number, data: any): Promise<any> {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/events/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+      });
+      if (res.ok) return await res.json();
+    } catch {}
     try {
       const stored = localStorage.getItem('events');
       if (stored) {
@@ -1104,24 +1405,55 @@ export const api = {
     } catch (e) { console.error(e); }
     return { status: 'success' };
   },
-  async getCommitteeTasks(): Promise<any[]> {
+  async getCommitteeTasks(eventId?: number): Promise<any[]> {
+    try {
+      const url = eventId ? `${API_BASE_URL}/api/committee-tasks?event_id=${eventId}` : `${API_BASE_URL}/api/committee-tasks`;
+      const res = await fetch(url);
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.length > 0) return data;
+      }
+    } catch {}
     try {
       const stored = localStorage.getItem('committee_tasks');
       if (stored) return JSON.parse(stored);
     } catch {}
-    return [{ id: 1, task: "Venue Booking & AV setup", assigned_to: "Prof. Vance", status: "In Progress" }];
+    return [
+      { id: 1, event_id: 1, task: "Venue Booking & Stage Setup", assigned_to: "Prof. Vance", priority: "high", due_date: "2026-08-10", status: "Completed", category: "Venue" },
+      { id: 2, event_id: 1, task: "Keynote Speaker Confirmation", assigned_to: "Dr. S. Sharma", priority: "high", due_date: "2026-08-01", status: "In Progress", category: "Speaker" },
+      { id: 3, event_id: 1, task: "Catering & High-Tea Arrangement", assigned_to: "Prof. Rajesh", priority: "medium", due_date: "2026-08-13", status: "Pending", category: "Food" },
+      { id: 4, event_id: 1, task: "Certificates & Mementos Preparation", assigned_to: "Prof. Priya", priority: "low", due_date: "2026-08-18", status: "Pending", category: "Certificates" },
+      { id: 5, event_id: 1, task: "Student Registration & Badges", assigned_to: "Prof. Preethi R", priority: "medium", due_date: "2026-08-12", status: "In Progress", category: "Registration" },
+      { id: 6, event_id: 1, task: "Post-Event Feedback & NAAC Report", assigned_to: "Prof. Arul", priority: "medium", due_date: "2026-08-22", status: "Pending", category: "Report" }
+    ];
   },
   async addCommitteeTask(data: any): Promise<any> {
     try {
+      const res = await fetch(`${API_BASE_URL}/api/committee-tasks`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+      });
+      if (res.ok) return await res.json();
+    } catch {}
+    try {
       const stored = localStorage.getItem('committee_tasks');
-      const list = stored ? JSON.parse(stored) : [{ id: 1, task: "Venue Booking & AV setup", assigned_to: "Prof. Vance", status: "In Progress" }];
-      const newItem = { id: Date.now(), ...data };
-      list.push(newItem);
+      const list = stored ? JSON.parse(stored) : [];
+      const newItem = { id: Date.now(), priority: "medium", ...data };
+      list.unshift(newItem);
       localStorage.setItem('committee_tasks', JSON.stringify(list));
     } catch (e) { console.error(e); }
     return { status: 'success' };
   },
   async editCommitteeTask(id: number, data: any): Promise<any> {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/committee-tasks/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+      });
+      if (res.ok) return await res.json();
+    } catch {}
     try {
       const stored = localStorage.getItem('committee_tasks');
       if (stored) {
@@ -1134,6 +1466,49 @@ export const api = {
       }
     } catch (e) { console.error(e); }
     return { status: 'success' };
+  },
+  async planEvent(prompt: string): Promise<any> {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/events/plan`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ request: prompt })
+      });
+      if (res.ok) return await res.json();
+    } catch {}
+    return null;
+  },
+  async getEventRisk(eventId: number): Promise<any> {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/events/${eventId}/risk`);
+      if (res.ok) return await res.json();
+    } catch {}
+    return null;
+  },
+  async getEventBudget(eventId: number): Promise<any> {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/events/${eventId}/budget`);
+      if (res.ok) return await res.json();
+    } catch {}
+    return null;
+  },
+  async generateEventCommunication(type: string, eventId?: number): Promise<any> {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/events/communication`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type, event_id: eventId })
+      });
+      if (res.ok) return await res.json();
+    } catch {}
+    return null;
+  },
+  async getPostEventReport(eventId: number): Promise<any> {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/events/${eventId}/report`);
+      if (res.ok) return await res.json();
+    } catch {}
+    return null;
   },
 
   // Phase 10: Inventory
