@@ -1884,6 +1884,235 @@ def get_all_resumes(db: Session = Depends(get_db)):
     return {"resumes": results}
 
 
+
+# ==========================================
+# REST API FOR EVENT & COMMITTEE MANAGEMENT (AGENT 9)
+# ==========================================
+
+@app.get("/api/events")
+def get_all_events(db: Session = Depends(get_db)):
+    events = db.query(Event).order_by(Event.id.desc()).all()
+    if not events:
+        # Seed initial if empty
+        ev1 = Event(name="International AI Symposium 2026", type="Symposium", date="2026-08-20", venue="Main Auditorium", organizer="CSE & AI Department", expected_participants=250, allocated_budget=75000.0, spent_budget=48750.0, status="approved")
+        ev2 = Event(name="FDP on Cloud & Distributed Computing", type="FDP", date="2026-09-15", venue="Seminar Hall B", organizer="CCE Department", expected_participants=80, allocated_budget=35000.0, spent_budget=12000.0, status="planning")
+        ev3 = Event(name="Hands-on Workshop: Edge AI & IoT", type="Workshop", date="2026-10-10", venue="Lab 3 & LH-201", organizer="CSE Department", expected_participants=120, allocated_budget=45000.0, spent_budget=0.0, status="planning")
+        db.add_all([ev1, ev2, ev3])
+        db.commit()
+        events = [ev1, ev2, ev3]
+
+    res = []
+    for e in events:
+        tasks = db.query(CommitteeTask).filter(CommitteeTask.event_id == e.id).all()
+        overdue_cnt = sum(1 for t in tasks if t.status != "Completed" and t.priority == "high")
+        comp_ratio = (sum(1 for t in tasks if t.status == "Completed") / max(1, len(tasks))) * 100 if tasks else 60
+        health_score = int(max(25, min(100, (comp_ratio * 0.5) + 40 - (overdue_cnt * 12))))
+        tier = "Healthy" if health_score >= 80 else ("Needs Attention" if health_score >= 60 else ("At Risk" if health_score >= 40 else "Critical"))
+        res.append({
+            "id": e.id,
+            "title": e.name,
+            "name": e.name,
+            "type": e.type,
+            "date": e.date,
+            "venue": e.venue,
+            "organizer": e.organizer or "CSE Department",
+            "expected_participants": e.expected_participants,
+            "allocated_budget": e.allocated_budget,
+            "spent_budget": e.spent_budget,
+            "status": e.status,
+            "health_score": health_score,
+            "health_tier": tier,
+            "timeline": json.loads(e.timeline_json) if e.timeline_json else []
+        })
+    return res
+
+@app.post("/api/events")
+def create_event_record(payload: dict = Body(...), db: Session = Depends(get_db)):
+    name = payload.get("name") or payload.get("title")
+    if not name:
+        raise HTTPException(status_code=400, detail="Event name is required")
+    
+    ev = Event(
+        name=name,
+        type=payload.get("type", "Workshop"),
+        date=payload.get("date", "2026-09-15"),
+        venue=payload.get("venue", "Seminar Hall A"),
+        organizer=payload.get("organizer", "CSE Department"),
+        expected_participants=int(payload.get("expected_participants", 100)),
+        allocated_budget=float(payload.get("allocated_budget", 45000.0)),
+        spent_budget=float(payload.get("spent_budget", 0.0)),
+        status=payload.get("status", "planning"),
+        timeline_json=json.dumps(payload.get("timeline", []))
+    )
+    db.add(ev)
+    db.commit()
+    db.refresh(ev)
+    return {"status": "success", "event": {"id": ev.id, "name": ev.name, "date": ev.date, "venue": ev.venue}}
+
+@app.put("/api/events/{event_id}")
+def update_event_record(event_id: int, payload: dict = Body(...), db: Session = Depends(get_db)):
+    ev = db.query(Event).filter(Event.id == event_id).first()
+    if not ev:
+        raise HTTPException(status_code=404, detail="Event not found")
+    if "name" in payload or "title" in payload:
+        ev.name = payload.get("name") or payload.get("title")
+    if "type" in payload:
+        ev.type = payload["type"]
+    if "date" in payload:
+        ev.date = payload["date"]
+    if "venue" in payload:
+        ev.venue = payload["venue"]
+    if "organizer" in payload:
+        ev.organizer = payload["organizer"]
+    if "allocated_budget" in payload:
+        ev.allocated_budget = float(payload["allocated_budget"])
+    if "spent_budget" in payload:
+        ev.spent_budget = float(payload["spent_budget"])
+    if "status" in payload:
+        ev.status = payload["status"]
+    db.commit()
+    db.refresh(ev)
+    return {"status": "success", "event": {"id": ev.id, "name": ev.name, "date": ev.date}}
+
+@app.delete("/api/events/{event_id}")
+def delete_event_record(event_id: int, db: Session = Depends(get_db)):
+    ev = db.query(Event).filter(Event.id == event_id).first()
+    if not ev:
+        raise HTTPException(status_code=404, detail="Event not found")
+    db.delete(ev)
+    db.commit()
+    return {"status": "success", "message": "Event deleted"}
+
+@app.get("/api/committee-tasks")
+def get_committee_tasks(event_id: Optional[int] = None, db: Session = Depends(get_db)):
+    q = db.query(CommitteeTask)
+    if event_id:
+        q = q.filter(CommitteeTask.event_id == event_id)
+    tasks = q.order_by(CommitteeTask.id.desc()).all()
+    if not tasks:
+        # Seed default tasks
+        t1 = CommitteeTask(event_id=1, task="Venue Booking & AV Setup", assigned_to="Prof. Vance", priority="high", due_date="2026-08-10", status="Completed", category="Venue")
+        t2 = CommitteeTask(event_id=1, task="Keynote Speaker Confirmation", assigned_to="Dr. S. Sharma", priority="high", due_date="2026-08-01", status="In Progress", category="Speaker")
+        t3 = CommitteeTask(event_id=1, task="Catering & High-Tea Arrangement", assigned_to="Prof. Rajesh", priority="medium", due_date="2026-08-13", status="Pending", category="Food")
+        t4 = CommitteeTask(event_id=1, task="Certificates & Mementos Preparation", assigned_to="Prof. Priya", priority="low", due_date="2026-08-18", status="Pending", category="Certificates")
+        t5 = CommitteeTask(event_id=1, task="Student Registration & Badges", assigned_to="Prof. Preethi R", priority="medium", due_date="2026-08-12", status="In Progress", category="Registration")
+        t6 = CommitteeTask(event_id=1, task="Post-Event Feedback & NAAC Report", assigned_to="Prof. Arul", priority="medium", due_date="2026-08-22", status="Pending", category="Report")
+        db.add_all([t1, t2, t3, t4, t5, t6])
+        db.commit()
+        tasks = [t1, t2, t3, t4, t5, t6]
+    return [
+        {
+            "id": t.id,
+            "event_id": t.event_id,
+            "task": t.task,
+            "assigned_to": t.assigned_to,
+            "priority": t.priority,
+            "due_date": t.due_date,
+            "status": t.status,
+            "category": t.category
+        }
+        for t in tasks
+    ]
+
+@app.post("/api/committee-tasks")
+def create_committee_task(payload: dict = Body(...), db: Session = Depends(get_db)):
+    task = payload.get("task")
+    if not task:
+        raise HTTPException(status_code=400, detail="Task description is required")
+    t = CommitteeTask(
+        event_id=payload.get("event_id"),
+        task=task,
+        assigned_to=payload.get("assigned_to", "Unassigned"),
+        priority=payload.get("priority", "medium"),
+        due_date=payload.get("due_date", "2026-08-15"),
+        status=payload.get("status", "Pending"),
+        category=payload.get("category", "Logistics")
+    )
+    db.add(t)
+    db.commit()
+    db.refresh(t)
+    return {"status": "success", "task": {"id": t.id, "task": t.task, "assigned_to": t.assigned_to, "status": t.status}}
+
+@app.put("/api/committee-tasks/{task_id}")
+def update_committee_task(task_id: int, payload: dict = Body(...), db: Session = Depends(get_db)):
+    t = db.query(CommitteeTask).filter(CommitteeTask.id == task_id).first()
+    if not t:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if "task" in payload:
+        t.task = payload["task"]
+    if "assigned_to" in payload:
+        t.assigned_to = payload["assigned_to"]
+    if "priority" in payload:
+        t.priority = payload["priority"]
+    if "due_date" in payload:
+        t.due_date = payload["due_date"]
+    if "status" in payload:
+        t.status = payload["status"]
+    if "category" in payload:
+        t.category = payload["category"]
+    db.commit()
+    db.refresh(t)
+    return {"status": "success", "task": {"id": t.id, "task": t.task, "status": t.status}}
+
+@app.delete("/api/committee-tasks/{task_id}")
+def delete_committee_task(task_id: int, db: Session = Depends(get_db)):
+    t = db.query(CommitteeTask).filter(CommitteeTask.id == task_id).first()
+    if not t:
+        raise HTTPException(status_code=404, detail="Task not found")
+    db.delete(t)
+    db.commit()
+    return {"status": "success", "message": "Task deleted"}
+
+# ==========================================
+# EVENT OPERATIONS COPILOT REST SERVICES (AGENT 9)
+# ==========================================
+from agents.event_management.agent import (
+    create_event_plan,
+    generate_event_tasks,
+    generate_timeline,
+    analyze_event_risk,
+    analyze_budget,
+    generate_communication,
+    extract_meeting_actions,
+    generate_event_day_checklist,
+    generate_post_event_report,
+    generate_event_briefing
+)
+
+@app.post("/api/events/plan")
+def api_create_event_plan(payload: dict = Body(...)):
+    prompt = payload.get("request") or payload.get("message", "Plan a one-day AI workshop for 150 students")
+    return create_event_plan(prompt)
+
+@app.get("/api/events/{event_id}/risk")
+def api_analyze_event_risk(event_id: int, db: Session = Depends(get_db)):
+    return analyze_event_risk(event_id, db)
+
+@app.get("/api/events/{event_id}/budget")
+def api_analyze_event_budget(event_id: int, db: Session = Depends(get_db)):
+    return analyze_budget(event_id, db)
+
+@app.post("/api/events/communication")
+def api_generate_event_communication(payload: dict = Body(...), db: Session = Depends(get_db)):
+    comm_type = payload.get("type", "Speaker Invitation")
+    event_id = payload.get("event_id")
+    custom_notes = payload.get("custom_notes", "")
+    return generate_communication(comm_type, event_id, db, custom_notes)
+
+@app.post("/api/events/meeting-minutes")
+def api_extract_meeting_minutes(payload: dict = Body(...)):
+    notes = payload.get("notes", "")
+    return extract_meeting_actions(notes)
+
+@app.get("/api/events/{event_id}/day-checklist")
+def api_get_event_day_checklist(event_id: int, db: Session = Depends(get_db)):
+    return generate_event_day_checklist(event_id, db)
+
+@app.get("/api/events/{event_id}/report")
+def api_get_post_event_report(event_id: int, db: Session = Depends(get_db)):
+    return generate_post_event_report(event_id, db)
+
+
 # ==========================================
 # REST API FOR ALUMNI RELATIONS (AGENT 8)
 # ==========================================
