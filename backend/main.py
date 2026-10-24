@@ -1,6 +1,7 @@
 import os
 import json
 import asyncio
+import datetime
 from fastapi import FastAPI, Depends, HTTPException, status, Body, UploadFile, File, Form, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, FileResponse
@@ -13,7 +14,9 @@ from core.models import (
     Faculty, Student, AttendanceRecord, Assignment, Submission, InternalMark,
     COAttainment, FacultyWorkload, Publication, GrantOpportunity, ResearchDeadline,
     QuestionBankItem, QuestionPaper, Rubric, Mentee, CheckIn, Escalation, Resume,
-    Alumni, PlacementDrive, Internship, StudentOffer, InterviewMaterial
+    Alumni, AlumniInteraction, AlumniMentorship, AlumniEvent, AlumniContribution, AlumniFollowUpTask,
+    PlacementDrive, Internship, StudentOffer, InterviewMaterial,
+    Event, CommitteeTask
 )
 from core.auth import verify_password, create_access_token, verify_token
 from core.seed import seed_database
