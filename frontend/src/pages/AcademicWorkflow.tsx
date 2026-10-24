@@ -5,7 +5,7 @@ import autoTable from 'jspdf-autotable';
 import { 
   BookOpen, Calendar, CheckSquare, Layers, Send, Sparkles, User, AlertCircle, 
   ChevronRight, Play, MessageSquare, Plus, Save, Upload, Trash2, CheckCircle, 
-  Edit, GraduationCap, Building, X, Check, Users, FileText
+  Edit, GraduationCap, Building, X, Check, Users, FileText, RotateCcw
 } from 'lucide-react';
 import { Card, Button, Input, Badge, Seal } from '../components/Common';
 import { api, type ChatMessage, type User as UserType } from '../services/api';
@@ -166,130 +166,233 @@ export const AcademicWorkflow: React.FC<AcademicWorkflowProps> = ({ user }) => {
   const selectedFaculty = faculties.find(f => f.id === selectedFacultyId) || faculties[0];
   const selectedCourse = courses.find(c => c.id === selectedCourseId) || courses[0];
 
-  // Client-side file parser for namelist (Excel .xlsx/.xls, CSV, Text) using SheetJS XLSX
-  const parseNamelistFile = async (file: File): Promise<{ attendanceList: any[], marksList: any[] }> => {
-    const fileNameLower = file.name.toLowerCase();
+  // Strict student validation helpers — rejects binary noise, compressed streams, and corrupt entries
+  const isValidRollNo = (s: any): boolean => {
+    if (!s || typeof s !== 'string') return false;
+    const str = s.trim();
+    if (str.length < 3 || str.length > 25) return false;
+    // Reject any non-ASCII character (bytes > 126 or control < 32)
+    if (/[^\x20-\x7E]/.test(str)) return false;
+    // Must be alphanumeric with standard separators: e.g. 24CC001, 24-CC-001, CS2021/001, 21EC104
+    if (!/^[A-Za-z0-9][A-Za-z0-9\-_./]*[A-Za-z0-9]$/.test(str)) return false;
+    // Must contain at least one digit or standard college abbreviation
+    if (!/\d/.test(str) && !/^[A-Z]{2,10}$/.test(str)) return false;
+    // Blacklist header and status terms
+    const lower = str.toLowerCase();
+    if (['roll', 'rollno', 'roll_no', 'reg', 'regno', 'sno', 'slno', 'serial', 'student', 'name', 'email', 'section', 'class', 'grade', 'status', 'present', 'absent'].includes(lower)) return false;
+    return true;
+  };
 
+  const isValidStudentName = (s: any): boolean => {
+    if (!s || typeof s !== 'string') return false;
+    const str = s.trim();
+    if (str.length < 2 || str.length > 60) return false;
+    // Reject non-ASCII or binary control characters
+    if (/[^\x20-\x7E]/.test(str)) return false;
+    // Must contain valid name characters (letters, spaces, dots, hyphens, apostrophes)
+    if (!/^[A-Za-z][A-Za-z\s.'-]{1,59}$/.test(str)) return false;
+    const lower = str.toLowerCase();
+    if (['name', 'student name', 'candidate name', 'full name', 'roll no', 'signature', 'remarks', 'absent', 'present'].includes(lower)) return false;
+    return true;
+  };
+
+  // Binary detection heuristic (magic bytes / null bytes / high non-ASCII ratio)
+  const isBinaryContent = (buffer: ArrayBuffer): boolean => {
+    const bytes = new Uint8Array(buffer.slice(0, 512));
+    if (bytes.length === 0) return false;
+    // PDF magic %PDF
+    if (bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46) return true;
+    // Check for null bytes or excessive unprintable control characters
+    let controlCount = 0;
+    for (let i = 0; i < bytes.length; i++) {
+      const b = bytes[i];
+      if (b === 0) return true;
+      if ((b < 32 && b !== 9 && b !== 10 && b !== 13) || b > 126) {
+        controlCount++;
+      }
+    }
+    return (controlCount / bytes.length) > 0.12;
+  };
+
+  // Immediate purge of any previously stored corrupted binary records from localStorage on mount
+  useEffect(() => {
+    const raw = localStorage.getItem('academic_uploaded_students');
+    if (raw) {
+      try {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.some((s: any) => !isValidRollNo(s?.roll_no) || !isValidStudentName(s?.name))) {
+          console.warn("Purged corrupted namelist from localStorage");
+          localStorage.removeItem('academic_uploaded_students');
+          localStorage.removeItem('academic_uploaded_marks');
+        }
+      } catch {
+        localStorage.removeItem('academic_uploaded_students');
+        localStorage.removeItem('academic_uploaded_marks');
+      }
+    }
+  }, []);
+
+  // Helpers for identifying header column types
+  const isSnoHeader  = (t: string) => /^(s\.?no\.?|sl\.?no\.?|sl\s*no|serial(\s*no(\.|umber)?)?|#|no\.)$/i.test(t.trim());
+  const isRollHeader = (t: string) => !isSnoHeader(t) && /roll|reg(istration)?|usn|htno|hall.?ticket|student.?id|matric|adm(ission)?|r\.?no/i.test(t);
+  const isNameHeader = (t: string) => !isSnoHeader(t) && !isRollHeader(t) && /^(student\s*)?name$|full.?name|candidate/i.test(t);
+
+  // Column detection by statistical content scoring (fallback when headers absent)
+  const detectColsByContent = (rows: string[][]): { rollIdx: number; nameIdx: number; emailIdx: number } => {
+    const numCols = Math.max(...rows.slice(0, 20).map(r => r.length), 0);
+    const rollScores = new Array(numCols).fill(0);
+    const nameScores = new Array(numCols).fill(0);
+    const emailScores = new Array(numCols).fill(0);
+    for (const row of rows.slice(0, 40)) {
+      for (let ci = 0; ci < row.length; ci++) {
+        const v = row[ci].trim();
+        if (!v) continue;
+        if (/@/.test(v) && /\./.test(v)) { emailScores[ci] += 2; }
+        else if (isValidRollNo(v)) { rollScores[ci] += 1.5; }
+        else if (isValidStudentName(v)) { nameScores[ci] += 1; }
+      }
+    }
+    const rollIdx = rollScores.indexOf(Math.max(...rollScores));
+    const nameIdx = nameScores.map((s, i) => i === rollIdx ? -1 : s).indexOf(Math.max(...nameScores.map((s, i) => i === rollIdx ? -1 : s)));
+    const emailIdx = emailScores.indexOf(Math.max(...emailScores));
+    return { rollIdx: rollScores[rollIdx] > 0 ? rollIdx : -1, nameIdx: nameScores[nameIdx] > 0 ? nameIdx : -1, emailIdx: emailScores[emailIdx] > 0 ? emailIdx : -1 };
+  };
+
+  // Parse a 2D string array (rows) into attendanceList / marksList with strict filtering
+  const rowsToStudents = (
+    rawRows: string[][],
+    opts: { rollIdx: number; nameIdx: number; emailIdx: number; secIdx: number; startRow: number }
+  ) => {
     const attendanceList: any[] = [];
     const marksList: any[] = [];
-
-    // 1. Plain CSV or TXT file
-    if (fileNameLower.endsWith('.csv') || fileNameLower.endsWith('.txt')) {
-      const text = await file.text();
-      const lines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
-
-      let isHeader = true;
-      for (const line of lines) {
-        if (isHeader && (line.toLowerCase().includes('roll') || line.toLowerCase().includes('name') || line.toLowerCase().includes('email'))) {
-          isHeader = false;
-          continue;
-        }
-        isHeader = false;
-
-        const parts = line.split(/,|\t|;/).map(p => p.trim().replace(/^["']|["']$/g, ''));
-        if (parts.length >= 2) {
-          const roll_no = parts[0];
-          const name = parts[1];
-          const email = parts[2] || `${roll_no.toLowerCase()}@student.edu`;
-          const class_sec = parts[3] || department;
-          const marks_obtained = parts[4] ? parseInt(parts[4]) : Math.floor(Math.random() * 15) + 33;
-
-          if (roll_no && name && !roll_no.startsWith('PK!')) {
-            attendanceList.push({
-              roll_no,
-              name,
-              email,
-              class_section: class_sec,
-              date: attendanceDate,
-              status: 'Present'
-            });
-
-            marksList.push({
-              roll_no,
-              name,
-              assessment_name: 'CAT 1',
-              marks_obtained,
-              max_marks: 50,
-              class_section: class_sec
-            });
-          }
-        }
-      }
-      return { attendanceList, marksList };
-    }
-
-    // 2. Excel (.xlsx / .xls / binary) file
-    const arrayBuffer = await file.arrayBuffer();
-    const workbook = XLSX.read(arrayBuffer, { type: 'array' });
-    const firstSheetName = workbook.SheetNames[0];
-    const worksheet = workbook.Sheets[firstSheetName];
-
-    const rawRows: any[] = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' });
-
-    let headerIndex = -1;
-    for (let i = 0; i < Math.min(rawRows.length, 10); i++) {
-      const rowStr = rawRows[i].map((cell: any) => String(cell).toLowerCase()).join(' ');
-      if (rowStr.includes('roll') || rowStr.includes('name') || rowStr.includes('student')) {
-        headerIndex = i;
-        break;
-      }
-    }
-
-    const startRow = headerIndex >= 0 ? headerIndex + 1 : 0;
+    const { rollIdx, nameIdx, emailIdx, secIdx, startRow } = opts;
+    if (rollIdx === -1 || nameIdx === -1) return { attendanceList, marksList };
 
     for (let i = startRow; i < rawRows.length; i++) {
       const row = rawRows[i];
       if (!row || row.length === 0) continue;
+      let roll_no = rollIdx < row.length ? row[rollIdx].trim() : '';
+      let name    = nameIdx  < row.length ? row[nameIdx].trim()  : '';
+      if (!roll_no || !name) continue;
 
-      const cellVals = row.map((c: any) => String(c).trim()).filter((c: string) => c !== '');
-      if (cellVals.length === 0) continue;
+      // Swap if columns appear inverted
+      if (!/\d/.test(roll_no) && /\d/.test(name)) {
+        [roll_no, name] = [name, roll_no];
+      }
 
-      let roll_no = '';
-      let name = '';
-      let email = '';
-      let class_sec = department;
-      let score = Math.floor(Math.random() * 15) + 33;
+      // STRICT VALIDATION: drop any binary noise or invalid strings
+      if (!isValidRollNo(roll_no) || !isValidStudentName(name)) {
+        continue;
+      }
 
-      for (let j = 0; j < cellVals.length; j++) {
-        const val = cellVals[j];
-        if (!roll_no && (/^[a-zA-Z0-9_-]{3,20}$/.test(val) && /\d/.test(val) && !val.includes(' '))) {
-          roll_no = val;
-        } else if (!name && val.length >= 2 && !val.includes('@') && !/^\d+$/.test(val)) {
-          name = val;
-        } else if (!email && val.includes('@')) {
-          email = val;
-        } else if (!isNaN(Number(val)) && Number(val) >= 0 && Number(val) <= 100) {
-          score = Number(val);
+      const email     = (emailIdx !== -1 && emailIdx < row.length && /@/.test(row[emailIdx])) ? row[emailIdx].trim() : `${roll_no.toLowerCase()}@student.edu`;
+      const class_sec = (secIdx   !== -1 && secIdx   < row.length && row[secIdx].trim()) ? row[secIdx].trim() : department;
+      const marks_obtained = Math.floor(Math.random() * 15) + 33;
+      attendanceList.push({ roll_no, name, email, class_section: class_sec, date: attendanceDate, status: 'Present' });
+      marksList.push({ roll_no, name, assessment_name: 'CAT 1', marks_obtained, max_marks: 50, class_section: class_sec });
+    }
+    return { attendanceList, marksList };
+  };
+
+  // Client-side file parser for namelist (Excel .xlsx/.xls, CSV, TXT) with PDF isolation
+  const parseNamelistFile = async (file: File): Promise<{ attendanceList: any[], marksList: any[], isPdfOrBinary: boolean }> => {
+    const fileNameLower = file.name.toLowerCase();
+
+    // ---- 1. PDF files: NEVER parse client-side with XLSX! Always delegate to backend PDF extractor ----
+    if (fileNameLower.endsWith('.pdf') || file.type === 'application/pdf') {
+      return { attendanceList: [], marksList: [], isPdfOrBinary: true };
+    }
+
+    // ---- 2. CSV / TXT / TSV files ----
+    if (fileNameLower.endsWith('.csv') || fileNameLower.endsWith('.txt') || fileNameLower.endsWith('.tsv')) {
+      const arrayBuffer = await file.arrayBuffer();
+      if (isBinaryContent(arrayBuffer)) {
+        // Binary file disguised as text, delegate to backend
+        return { attendanceList: [], marksList: [], isPdfOrBinary: true };
+      }
+
+      const text = new TextDecoder('utf-8', { fatal: false }).decode(arrayBuffer);
+      const rawLines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
+      if (rawLines.length === 0) return { attendanceList: [], marksList: [], isPdfOrBinary: false };
+
+      const firstLine = rawLines[0];
+      const delim = /\t/.test(firstLine) ? '\t' : /;/.test(firstLine) ? ';' : ',';
+      const rawRows: string[][] = rawLines.map(l => l.split(delim).map(c => c.trim().replace(/^["']|["']$/g, '')));
+
+      let headerIdx = -1;
+      let rollIdx = -1, nameIdx = -1, emailIdx = -1, secIdx = -1;
+
+      for (let i = 0; i < Math.min(rawRows.length, 15); i++) {
+        const cells = rawRows[i].map(c => c.toLowerCase());
+        const rIdx = cells.findIndex(c => isRollHeader(c));
+        const nIdx = cells.findIndex(c => isNameHeader(c));
+        if (rIdx !== -1 && nIdx !== -1) {
+          headerIdx = i; rollIdx = rIdx; nameIdx = nIdx;
+          emailIdx = cells.findIndex(c => /email|mail/.test(c));
+          secIdx   = cells.findIndex(c => /section|class|sec|dept/.test(c));
+          break;
         }
       }
 
-      if (!roll_no && cellVals[0]) roll_no = cellVals[0];
-      if (!name && cellVals[1]) name = cellVals[1];
-
-      if (roll_no && (roll_no.startsWith('PK!') || roll_no.includes('Content_Types'))) continue;
-
-      if (roll_no && name) {
-        attendanceList.push({
-          roll_no,
-          name,
-          email: email || `${roll_no.toLowerCase()}@student.edu`,
-          class_section: class_sec,
-          date: attendanceDate,
-          status: 'Present'
-        });
-
-        marksList.push({
-          roll_no,
-          name,
-          assessment_name: 'CAT 1',
-          marks_obtained: score,
-          max_marks: 50,
-          class_section: class_sec
-        });
+      if (rollIdx === -1 || nameIdx === -1) {
+        const { rollIdx: ri, nameIdx: ni, emailIdx: ei } = detectColsByContent(rawRows.slice(1));
+        rollIdx = ri; nameIdx = ni; emailIdx = ei;
+        headerIdx = rawRows[0].some(c => /roll|name|email/i.test(c)) ? 0 : -1;
       }
+
+      const startRow = headerIdx >= 0 ? headerIdx + 1 : 0;
+      const parsed = rowsToStudents(rawRows, { rollIdx, nameIdx, emailIdx, secIdx, startRow });
+      return { ...parsed, isPdfOrBinary: false };
     }
 
-    return { attendanceList, marksList };
+    // ---- 3. Excel (.xlsx / .xls) ----
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      // Guard against non-Excel binary files
+      if (isBinaryContent(arrayBuffer) && !fileNameLower.endsWith('.xlsx') && !fileNameLower.endsWith('.xls')) {
+        return { attendanceList: [], marksList: [], isPdfOrBinary: true };
+      }
+
+      const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+      if (!workbook || !workbook.SheetNames || workbook.SheetNames.length === 0) {
+        return { attendanceList: [], marksList: [], isPdfOrBinary: false };
+      }
+
+      const firstSheetName = workbook.SheetNames[0];
+      const worksheet = workbook.Sheets[firstSheetName];
+      const rawXLRows: any[] = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' });
+
+      if (rawXLRows.length === 0) return { attendanceList: [], marksList: [], isPdfOrBinary: false };
+
+      const strRows: string[][] = rawXLRows.map(row => (row as any[]).map((c: any) => String(c ?? '').trim()));
+
+      let headerIdx = -1, rollIdx = -1, nameIdx = -1, emailIdx = -1, secIdx = -1;
+
+      for (let i = 0; i < Math.min(strRows.length, 15); i++) {
+        const cells = strRows[i].map(c => c.toLowerCase());
+        const rIdx = cells.findIndex(c => isRollHeader(c));
+        const nIdx = cells.findIndex(c => isNameHeader(c));
+        if (rIdx !== -1 && nIdx !== -1) {
+          headerIdx = i; rollIdx = rIdx; nameIdx = nIdx;
+          emailIdx = cells.findIndex(c => /email|mail|e-mail/.test(c));
+          secIdx   = cells.findIndex(c => /section|class|sec|dept/.test(c));
+          break;
+        }
+      }
+
+      if (rollIdx === -1 || nameIdx === -1) {
+        const { rollIdx: ri, nameIdx: ni, emailIdx: ei } = detectColsByContent(strRows.slice(1));
+        rollIdx = ri; nameIdx = ni; emailIdx = ei;
+        headerIdx = strRows[0].some(c => /roll|name|email|reg/i.test(c)) ? 0 : -1;
+      }
+
+      const startRow = headerIdx >= 0 ? headerIdx + 1 : 0;
+      const parsed = rowsToStudents(strRows, { rollIdx, nameIdx, emailIdx, secIdx, startRow });
+      return { ...parsed, isPdfOrBinary: false };
+    } catch (err) {
+      console.warn("Client XLSX parsing failed, will delegate to backend:", err);
+      return { attendanceList: [], marksList: [], isPdfOrBinary: true };
+    }
   };
 
   const handleUploadNamelist = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -306,23 +409,42 @@ export const AcademicWorkflow: React.FC<AcademicWorkflowProps> = ({ user }) => {
         setMarks(marksList);
         localStorage.setItem('academic_uploaded_students', JSON.stringify(attendanceList));
         localStorage.setItem('academic_uploaded_marks', JSON.stringify(marksList));
-
         setActionFeedback({
           type: 'success',
-          message: `Successfully loaded ${attendanceList.length} student records from "${file.name}" into both Attendance Grid and Marks Register!`
+          message: `Successfully loaded ${attendanceList.length} student records from "${file.name}" into the Attendance Grid and Marks Register!`
         });
       } else {
+        // Backend processor for PDF, server-side Excel, or multi-format documents
         const res = await api.uploadNamelist(file, department, selectedCourse ? selectedCourse.title : "Design & Analysis of Algorithms");
+        
+        if (res.students && Array.isArray(res.students) && res.students.length > 0) {
+          const validStudents = res.students.filter((s: any) => isValidRollNo(s?.roll_no) && isValidStudentName(s?.name));
+          if (validStudents.length > 0) {
+            setAttendance(validStudents);
+            const generatedMarks = validStudents.map((s: any) => ({
+              roll_no: s.roll_no,
+              name: s.name,
+              assessment_name: 'CAT 1',
+              marks_obtained: Math.floor(Math.random() * 15) + 33,
+              max_marks: 50,
+              class_section: s.class_section || department
+            }));
+            setMarks(generatedMarks);
+            localStorage.setItem('academic_uploaded_students', JSON.stringify(validStudents));
+            localStorage.setItem('academic_uploaded_marks', JSON.stringify(generatedMarks));
+          }
+        }
+        
         setActionFeedback({
           type: 'success',
-          message: res.message || `Successfully processed class namelist.`
+          message: res.message || `Successfully processed "${file.name}" on server.`
         });
-        loadData();
+        await loadData();
       }
     } catch (err: any) {
       setActionFeedback({
         type: 'error',
-        message: err.message || "Failed to process class namelist file."
+        message: err.message || "Failed to process class namelist file. Please upload a valid CSV, Excel, or readable PDF."
       });
     } finally {
       setIsUploading(false);
@@ -331,25 +453,80 @@ export const AcademicWorkflow: React.FC<AcademicWorkflowProps> = ({ user }) => {
     }
   };
 
+  const handleClearRoster = () => {
+    if (!window.confirm('Are you sure you want to clear the entire student roster? This will reset the Attendance Grid and Marks Register.')) return;
+    setAttendance([]);
+    setMarks([]);
+    localStorage.removeItem('academic_uploaded_students');
+    localStorage.removeItem('academic_uploaded_marks');
+    setActionFeedback({ type: 'success', message: 'Student roster cleared. Upload a new namelist to repopulate.' });
+    loadData();
+  };
+
   const loadData = async () => {
     setIsLoading(true);
     try {
-      const savedStudents = localStorage.getItem('academic_uploaded_students');
-      const savedMarks = localStorage.getItem('academic_uploaded_marks');
+      const savedStudentsRaw = localStorage.getItem('academic_uploaded_students');
+      const savedMarksRaw = localStorage.getItem('academic_uploaded_marks');
 
-      let attData = savedStudents ? JSON.parse(savedStudents) : await api.getAttendance();
-      let markData = savedMarks ? JSON.parse(savedMarks) : await api.getMarks();
+      let attData: any[] = [];
+      let markData: any[] = [];
 
-      // Clean up any corrupted binary artifact entries
-      if (Array.isArray(attData)) {
-        attData = attData.filter((a: any) => a.roll_no && !a.roll_no.startsWith('PK!') && !a.roll_no.includes('Content_Types'));
+      // Validate saved students from localStorage and purge if corrupted
+      if (savedStudentsRaw) {
+        try {
+          const parsed = JSON.parse(savedStudentsRaw);
+          if (Array.isArray(parsed)) {
+            const valid = parsed.filter((s: any) => isValidRollNo(s?.roll_no) && isValidStudentName(s?.name));
+            if (valid.length === parsed.length && valid.length > 0) {
+              attData = valid;
+            } else if (valid.length > 0) {
+              attData = valid;
+              localStorage.setItem('academic_uploaded_students', JSON.stringify(valid));
+            } else {
+              localStorage.removeItem('academic_uploaded_students');
+              localStorage.removeItem('academic_uploaded_marks');
+            }
+          } else {
+            localStorage.removeItem('academic_uploaded_students');
+          }
+        } catch {
+          localStorage.removeItem('academic_uploaded_students');
+        }
       }
-      if (Array.isArray(markData)) {
-        markData = markData.filter((m: any) => m.roll_no && !m.roll_no.startsWith('PK!') && !m.roll_no.includes('Content_Types'));
+
+      if (attData.length === 0) {
+        const serverAtt = await api.getAttendance();
+        attData = Array.isArray(serverAtt) ? serverAtt.filter((a: any) => isValidRollNo(a?.roll_no)) : [];
       }
+
+      if (savedMarksRaw) {
+        try {
+          const parsedM = JSON.parse(savedMarksRaw);
+          if (Array.isArray(parsedM)) {
+            const validM = parsedM.filter((m: any) => isValidRollNo(m?.roll_no) && isValidStudentName(m?.name));
+            if (validM.length > 0) {
+              markData = validM;
+            } else {
+              localStorage.removeItem('academic_uploaded_marks');
+            }
+          }
+        } catch {
+          localStorage.removeItem('academic_uploaded_marks');
+        }
+      }
+
+      if (markData.length === 0) {
+        const serverMarks = await api.getMarks();
+        markData = Array.isArray(serverMarks) ? serverMarks.filter((m: any) => isValidRollNo(m?.roll_no)) : [];
+      }
+
+      setAttendance(attData);
+      setMarks(markData);
 
       const savedAss = localStorage.getItem('academic_workflow_assignments');
       let assData = savedAss ? JSON.parse(savedAss) : await api.getAssignments();
+
       if (!assData || !Array.isArray(assData) || assData.length === 0) {
         assData = [
           { id: 'ass_1', title: 'Assignment 1 - Greedy Algorithms', description: 'Analyze fractional knapsack and Huffman coding algorithm implementation.', class_section: department, due_date: '2026-08-05', max_marks: 50, submitted_count: 8, total_students: 10, status: 'Active' },
@@ -1182,6 +1359,16 @@ export const AcademicWorkflow: React.FC<AcademicWorkflowProps> = ({ user }) => {
                     >
                       <FileText size={11} /> Download CSV Template
                     </a>
+                    {attendance.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={handleClearRoster}
+                        className="text-[10px] font-mono text-rose-400 hover:text-rose-300 hover:underline inline-flex items-center gap-1 ml-auto transition"
+                        title="Clear uploaded roster and reset to default"
+                      >
+                        <Trash2 size={11} /> Clear Roster ({attendance.length})
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>

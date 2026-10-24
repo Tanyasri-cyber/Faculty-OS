@@ -435,11 +435,25 @@ export const api = {
     const formData = new FormData();
     formData.append('file', file);
     formData.append('dept', dept);
+    formData.append('class_section', dept);
     formData.append('subject', subject);
-    const response = await fetch(`${API_BASE_URL}/api/attendance/upload-namelist`, {
+    
+    let response = await fetch(`${API_BASE_URL}/api/attendance/upload-namelist`, {
       method: 'POST',
       body: formData
     });
+
+    if (response.status === 404 || response.status === 405) {
+      response = await fetch(`${API_BASE_URL}/api/students/upload-namelist`, {
+        method: 'POST',
+        body: formData
+      });
+    }
+
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({ detail: 'Failed to process namelist' }));
+      throw new Error(err.detail || 'Failed to process namelist on server');
+    }
     return await response.json();
   },
 
@@ -899,29 +913,74 @@ export const api = {
     return { status: 'success' };
   },
 
-  // Phase 8: Alumni
-  async getAlumniDirectory(): Promise<any[]> {
+  // Phase 8: Alumni Relations (Agent 8)
+  async getAlumniDirectory(params?: { search?: string; batch?: number; department?: string; industry?: string; company?: string; mentorship_available?: boolean; engagement_status?: string; sort_by?: string }): Promise<any[]> {
+    try {
+      const q = new URLSearchParams();
+      if (params) {
+        Object.entries(params).forEach(([k, v]) => {
+          if (v !== undefined && v !== null && v !== '' && v !== 'All') {
+            q.append(k, String(v));
+          }
+        });
+      }
+      const res = await fetch(`${API_BASE_URL}/api/alumni?${q.toString()}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data) && data.length > 0) return data;
+      }
+    } catch (e) {
+      console.warn("Backend /api/alumni unavailable, using fallback cache", e);
+    }
     try {
       const stored = localStorage.getItem('alumni_directory');
       if (stored) return JSON.parse(stored);
     } catch {}
-    return [
-      { id: 1, name: "Siddharth M", batch: "2024", company: "Google", designation: "SDE 2", willing_to_refer: true },
-      { id: 2, name: "Preethi", batch: "2023", company: "Microsoft", designation: "Frontend Engineer", willing_to_refer: true },
-      { id: 3, name: "Gowri F", batch: "2025", company: "Amazon", designation: "Backend Engineer", willing_to_refer: true }
-    ];
+    return [];
   },
+
+  async getAlumniDetail(id: number): Promise<any> {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/alumni/${id}`);
+      if (res.ok) return await res.json();
+    } catch (e) {
+      console.warn("Backend /api/alumni/:id error", e);
+    }
+    return null;
+  },
+
   async addAlumni(data: any): Promise<any> {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/alumni`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+      });
+      if (res.ok) return await res.json();
+    } catch (e) {
+      console.error(e);
+    }
     try {
       const stored = localStorage.getItem('alumni_directory');
       const list = stored ? JSON.parse(stored) : [];
-      const newItem = { id: Date.now(), ...data };
+      const newItem = { id: Date.now(), ...data, engagement_score: 75, engagement_status: "Active" };
       list.push(newItem);
       localStorage.setItem('alumni_directory', JSON.stringify(list));
-    } catch (e) { console.error(e); }
+    } catch {}
     return { status: 'success' };
   },
+
   async editAlumni(id: number, data: any): Promise<any> {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/alumni/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+      });
+      if (res.ok) return await res.json();
+    } catch (e) {
+      console.error(e);
+    }
     try {
       const stored = localStorage.getItem('alumni_directory');
       if (stored) {
@@ -932,39 +991,201 @@ export const api = {
           localStorage.setItem('alumni_directory', JSON.stringify(list));
         }
       }
-    } catch (e) { console.error(e); }
+    } catch {}
     return { status: 'success' };
   },
-  async getAlumniDonations(): Promise<any[]> {
+
+  async deleteAlumni(id: number): Promise<any> {
     try {
-      const stored = localStorage.getItem('alumni_donations');
+      const res = await fetch(`${API_BASE_URL}/api/alumni/${id}`, { method: 'DELETE' });
+      if (res.ok) return await res.json();
+    } catch (e) {
+      console.error(e);
+    }
+    return { status: 'success' };
+  },
+
+  async logAlumniInteraction(alumniId: number, data: any): Promise<any> {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/alumni/${alumniId}/interactions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+      });
+      if (res.ok) return await res.json();
+    } catch (e) {
+      console.error(e);
+    }
+    return { status: 'success' };
+  },
+
+  async getAlumniMentorships(status?: string): Promise<any[]> {
+    try {
+      const url = status && status !== 'All' ? `${API_BASE_URL}/api/alumni/mentorships/all?status=${status}` : `${API_BASE_URL}/api/alumni/mentorships/all`;
+      const res = await fetch(url);
+      if (res.ok) return await res.json();
+    } catch (e) {
+      console.warn("Backend /api/alumni/mentorships/all error", e);
+    }
+    try {
+      const stored = localStorage.getItem('alumni_mentorships');
       if (stored) return JSON.parse(stored);
     } catch {}
     return [];
   },
-  async addAlumniDonation(data: any): Promise<any> {
+
+  async createAlumniMentorship(data: any): Promise<any> {
     try {
-      const stored = localStorage.getItem('alumni_donations');
-      const list = stored ? JSON.parse(stored) : [];
-      const newItem = { id: Date.now(), ...data };
-      list.push(newItem);
-      localStorage.setItem('alumni_donations', JSON.stringify(list));
-    } catch (e) { console.error(e); }
+      const res = await fetch(`${API_BASE_URL}/api/alumni/mentorships`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+      });
+      if (res.ok) return await res.json();
+    } catch (e) {
+      console.error(e);
+    }
     return { status: 'success' };
   },
-  async editAlumniDonation(id: number, data: any): Promise<any> {
+
+  async updateAlumniMentorshipStatus(id: number, data: any): Promise<any> {
     try {
-      const stored = localStorage.getItem('alumni_donations');
-      if (stored) {
-        const list = JSON.parse(stored);
-        const idx = list.findIndex((x: any) => x.id === id);
-        if (idx >= 0) {
-          list[idx] = { ...list[idx], ...data };
-          localStorage.setItem('alumni_donations', JSON.stringify(list));
-        }
-      }
-    } catch (e) { console.error(e); }
+      const res = await fetch(`${API_BASE_URL}/api/alumni/mentorships/${id}/status`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+      });
+      if (res.ok) return await res.json();
+    } catch (e) {
+      console.error(e);
+    }
     return { status: 'success' };
+  },
+
+  async getAlumniContributions(): Promise<any[]> {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/alumni/contributions/all`);
+      if (res.ok) return await res.json();
+    } catch (e) {
+      console.warn("Backend /api/alumni/contributions/all error", e);
+    }
+    return [];
+  },
+
+  async addAlumniContribution(data: any): Promise<any> {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/alumni/contributions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+      });
+      if (res.ok) return await res.json();
+    } catch (e) {
+      console.error(e);
+    }
+    return { status: 'success' };
+  },
+
+  async updateAlumniContributionStatus(id: number, data: any): Promise<any> {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/alumni/contributions/${id}/status`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+      });
+      if (res.ok) return await res.json();
+    } catch (e) {
+      console.error(e);
+    }
+    return { status: 'success' };
+  },
+
+  async getAlumniFollowUps(): Promise<any[]> {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/alumni/follow-ups/all`);
+      if (res.ok) return await res.json();
+    } catch (e) {
+      console.warn("Backend /api/alumni/follow-ups/all error", e);
+    }
+    return [];
+  },
+
+  async addAlumniFollowUp(data: any): Promise<any> {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/alumni/follow-ups`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+      });
+      if (res.ok) return await res.json();
+    } catch (e) {
+      console.error(e);
+    }
+    return { status: 'success' };
+  },
+
+  async updateAlumniFollowUp(id: number, data: any): Promise<any> {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/alumni/follow-ups/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+      });
+      if (res.ok) return await res.json();
+    } catch (e) {
+      console.error(e);
+    }
+    return { status: 'success' };
+  },
+
+  async getAlumniAnalyticsSummary(): Promise<any> {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/alumni/analytics/summary`);
+      if (res.ok) return await res.json();
+    } catch (e) {
+      console.warn("Backend /api/alumni/analytics/summary error", e);
+    }
+    return null;
+  },
+
+  async getAlumniSmartRecommendations(): Promise<any[]> {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/alumni/recommendations/smart`);
+      if (res.ok) {
+        const data = await res.json();
+        return data.recommendations || [];
+      }
+    } catch (e) {
+      console.warn("Backend /api/alumni/recommendations/smart error", e);
+    }
+    return [];
+  },
+
+  async matchAlumni(data: { type: string; skills: string[]; department?: string; topic?: string }): Promise<any[]> {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/alumni/match`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+      });
+      if (res.ok) {
+        const d = await res.json();
+        return d.matches || [];
+      }
+    } catch (e) {
+      console.error("Match alumni error", e);
+    }
+    return [];
+  },
+
+  async getAlumniDonations(): Promise<any[]> {
+    return this.getAlumniContributions();
+  },
+  async addAlumniDonation(data: any): Promise<any> {
+    return this.addAlumniContribution(data);
+  },
+  async editAlumniDonation(id: number, data: any): Promise<any> {
+    return this.updateAlumniContributionStatus(id, data);
   },
 
   // Phase 9: Events
