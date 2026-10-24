@@ -42,6 +42,26 @@
   --agent6-100: #4C0519;
   --agent6-700: #BE123C;
 
+  /* Agent 7 - Placement & Internships (blue) */
+  --agent7-500: #3B82F6;
+  --agent7-100: #1E3A8A;
+  --agent7-700: #1D4ED8;
+
+  /* Agent 8 - Alumni Relations (cyan/teal) */
+  --agent8-500: #06B6D4;
+  --agent8-100: #164E63;
+  --agent8-700: #0891B2;
+
+  /* Agent 9 - Event Management (amber/orange) */
+  --agent9-500: #F97316;
+  --agent9-100: #7C2D12;
+  --agent9-700: #C2410C;
+
+  /* Agent 10 - Inventory & Resources (violet) */
+  --agent10-500: #8B5CF6;
+  --agent10-100: #4C1D95;
+  --agent10-700: #6D28D9;
+
   /* Status (used across all agents) */
   --status-good:  #10B981;
   --status-warn:  #F59E0B;
@@ -91,6 +111,30 @@
   --accent-500: var(--agent6-500);
   --accent-100: var(--agent6-100);
   --accent-700: var(--agent6-700);
+}
+
+.theme-agent7 {
+  --accent-500: var(--agent7-500);
+  --accent-100: var(--agent7-100);
+  --accent-700: var(--agent7-700);
+}
+
+.theme-agent8 {
+  --accent-500: var(--agent8-500);
+  --accent-100: var(--agent8-100);
+  --accent-700: var(--agent8-700);
+}
+
+.theme-agent9 {
+  --accent-500: var(--agent9-500);
+  --accent-100: var(--agent9-100);
+  --accent-700: var(--agent9-700);
+}
+
+.theme-agent10 {
+  --accent-500: var(--agent10-500);
+  --accent-100: var(--agent10-100);
+  --accent-700: var(--agent10-700);
 }
 
 body {

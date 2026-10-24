@@ -1,6 +1,7 @@
 import os
 import json
 import asyncio
+import datetime
 from fastapi import FastAPI, Depends, HTTPException, status, Body, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, FileResponse
@@ -13,7 +14,7 @@ from core.models import (
     Faculty, Student, AttendanceRecord, Assignment, Submission, InternalMark,
     COAttainment, FacultyWorkload, Publication, GrantOpportunity, ResearchDeadline,
     QuestionBankItem, QuestionPaper, Rubric, Mentee, CheckIn, Escalation, Resume,
-    Event, CommitteeTask
+    Alumni, AlumniInteraction, AlumniMentorship, AlumniEvent, AlumniContribution, AlumniFollowUpTask
 )
 from core.auth import verify_password, create_access_token, verify_token
 from core.seed import seed_database
@@ -33,7 +34,17 @@ app = FastAPI(title="EduPilot Backend", version="1.0.0")
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # For MVP, allow all origins. Can narrow in production.
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:5174",
+        "http://127.0.0.1:5174",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
+    ],
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -494,10 +505,11 @@ def legacy_faculty_assistant_chat_stream(payload: dict = Body(...), db: Session 
 # ==========================================
 
 @app.get("/api/attendance")
-def get_attendance(class_section: str = "CCE", date: str = None, db: Session = Depends(get_db)):
+def get_attendance(class_section: str = "CCE", dept: str = None, date: str = None, db: Session = Depends(get_db)):
+    target_sec = dept or class_section or "CCE"
     if not date:
         latest_date_row = db.query(AttendanceRecord.date).filter(
-            AttendanceRecord.class_section == class_section
+            AttendanceRecord.class_section == target_sec
         ).order_by(AttendanceRecord.date.desc()).first()
         
         if not latest_date_row:
@@ -505,7 +517,7 @@ def get_attendance(class_section: str = "CCE", date: str = None, db: Session = D
         date = latest_date_row[0]
         
     records = db.query(AttendanceRecord).filter(
-        AttendanceRecord.class_section == class_section,
+        AttendanceRecord.class_section == target_sec,
         AttendanceRecord.date == date
     ).all()
     
@@ -525,9 +537,10 @@ def get_attendance(class_section: str = "CCE", date: str = None, db: Session = D
     return res
 
 @app.get("/api/attendance/dates")
-def get_recorded_dates(class_section: str = "CCE", db: Session = Depends(get_db)):
+def get_recorded_dates(class_section: str = "CCE", dept: str = None, db: Session = Depends(get_db)):
+    target_sec = dept or class_section or "CCE"
     rows = db.query(AttendanceRecord.date, AttendanceRecord.period).filter(
-        AttendanceRecord.class_section == class_section
+        AttendanceRecord.class_section == target_sec
     ).distinct().all()
     return [{"date": r[0], "period": r[1]} for r in rows]
 
@@ -537,7 +550,7 @@ def mark_attendance(payload: dict = Body(...), db: Session = Depends(get_db)):
     date = payload.get("date", datetime.date.today().strftime("%Y-%m-%d"))
     status = payload.get("status", "Present")
     subject = payload.get("subject", "Design & Analysis of Algorithms")
-    class_section = payload.get("class_section", "CSE-A")
+    class_section = payload.get("class_section", payload.get("dept", "CSE-A"))
     period = payload.get("period", "09:00 - 10:00")
 
     student = db.query(Student).filter(Student.roll_no == roll_no).first()
@@ -568,11 +581,12 @@ def mark_attendance(payload: dict = Body(...), db: Session = Depends(get_db)):
     return {"status": "success", "message": f"Attendance marked for {roll_no} as {status}."}
 
 @app.post("/api/attendance/bulk-save")
+@app.post("/api/attendance/save-bulk")
 def bulk_save_attendance(payload: dict = Body(...), db: Session = Depends(get_db)):
     date = payload.get("date", datetime.date.today().strftime("%Y-%m-%d"))
     period = payload.get("period", "09:00 - 10:00")
     subject = payload.get("subject", "Design & Analysis of Algorithms")
-    class_section = payload.get("class_section", "CCE")
+    class_section = payload.get("class_section", payload.get("dept", "CCE"))
     records = payload.get("records", [])
 
     for r_data in records:
@@ -734,7 +748,8 @@ def get_reminders_list():
 @app.post("/api/students/upload-namelist")
 async def upload_namelist(
     file: UploadFile = File(...),
-    class_section: str = Form("CSE-A"),
+    class_section: str = Form(None),
+    dept: str = Form(None),
     subject: str = Form("Design & Analysis of Algorithms"),
     db: Session = Depends(get_db)
 ):
@@ -743,11 +758,28 @@ async def upload_namelist(
     import io
     from core.llm import llm_client
 
+    target_sec = dept or class_section or "CSE"
     filename = file.filename.lower()
     contents = await file.read()
     
     students_to_process = []
     
+    def is_sno_header(text: str) -> bool:
+        t = text.lower().strip()
+        return t in ["s.no", "sl.no", "sno", "sl no", "serial", "serial no", "serial number", "no.", "#", "sl"]
+
+    def is_roll_header(text: str) -> bool:
+        t = text.lower().strip()
+        if is_sno_header(t):
+            return False
+        return any(k in t for k in ["roll", "reg", "admission", "student id", "matric", "usn", "ht no", "hall ticket", "id no"])
+
+    def is_name_header(text: str) -> bool:
+        t = text.lower().strip()
+        if is_sno_header(t) or is_roll_header(t):
+            return False
+        return any(k in t for k in ["name", "fullname", "student", "candidate"]) and "id" not in t
+
     # helper for regex fallback
     def regex_parse_students(text: str, default_sec: str) -> list:
         parsed = []
@@ -792,51 +824,93 @@ async def upload_namelist(
         return parsed
 
     # 1. Parse based on file type
-    if filename.endswith(".csv"):
+    if filename.endswith(".csv") or filename.endswith(".tsv") or filename.endswith(".txt"):
         import csv
         try:
             decoded = contents.decode("utf-8")
         except UnicodeDecodeError:
             decoded = contents.decode("latin-1")
             
-        reader = csv.reader(io.StringIO(decoded))
-        try:
-            headers = next(reader)
-            headers = [h.strip().lower() for h in headers]
-            roll_idx, name_idx, email_idx, sec_idx = -1, -1, -1, -1
-            for idx, h in enumerate(headers):
-                if "roll" in h:
-                    roll_idx = idx
-                elif "name" in h:
-                    name_idx = idx
-                elif "email" in h:
-                    email_idx = idx
-                elif "section" in h or "class" in h:
-                    sec_idx = idx
-                    
-            if roll_idx == -1 or name_idx == -1:
-                roll_idx, name_idx = 0, 1
-                email_idx = 2 if len(headers) > 2 else -1
-                sec_idx = 3 if len(headers) > 3 else -1
-                reader = csv.reader(io.StringIO(decoded)) # Reset to start if headers are data
-                
-            for row in reader:
-                if not row or len(row) <= max(roll_idx, name_idx):
-                    continue
-                roll_no = row[roll_idx].strip()
-                name = row[name_idx].strip()
-                if not roll_no or not name:
-                    continue
-                email = row[email_idx].strip() if (email_idx != -1 and len(row) > email_idx) else f"{roll_no.lower()}@student.edu"
-                row_sec = row[sec_idx].strip() if (sec_idx != -1 and len(row) > sec_idx) else class_section
-                students_to_process.append({
-                    "roll_no": roll_no,
-                    "name": name,
-                    "email": email,
-                    "class_section": row_sec
-                })
-        except Exception as e:
-            raise HTTPException(status_code=400, detail=f"Failed to parse CSV: {str(e)}")
+        delimiter = '\t' if filename.endswith('.tsv') else ','
+        lines = [l for l in decoded.splitlines() if l.strip()]
+        
+        # Detect delimiter if csv
+        if lines and ',' not in lines[0] and ';' in lines[0]:
+            delimiter = ';'
+        elif lines and ',' not in lines[0] and '\t' in lines[0]:
+            delimiter = '\t'
+
+        raw_rows = list(csv.reader(lines, delimiter=delimiter))
+        if not raw_rows:
+            raise HTTPException(status_code=400, detail="Empty namelist file uploaded")
+
+        header_idx = -1
+        roll_idx, name_idx, email_idx, sec_idx = -1, -1, -1, -1
+
+        for idx, r in enumerate(raw_rows[:15]):
+            cells = [str(c).lower().strip() for c in r]
+            r_idx = next((i for i, c in enumerate(cells) if is_roll_header(c)), -1)
+            n_idx = next((i for i, c in enumerate(cells) if is_name_header(c)), -1)
+            if r_idx != -1 and n_idx != -1:
+                header_idx = idx
+                roll_idx = r_idx
+                name_idx = n_idx
+                email_idx = next((i for i, c in enumerate(cells) if any(x in c for x in ["email", "mail"])), -1)
+                sec_idx = next((i for i, c in enumerate(cells) if any(x in c for x in ["section", "class", "sec", "dept"])), -1)
+                break
+
+        # Statistical classification fallback
+        if roll_idx == -1 or name_idx == -1:
+            num_cols = max(len(r) for r in raw_rows[:20]) if raw_rows else 0
+            col_scores = []
+            for col_idx in range(num_cols):
+                roll_score = 0
+                name_score = 0
+                email_score = 0
+                for r in raw_rows[:35]:
+                    if col_idx >= len(r):
+                        continue
+                    val = str(r[col_idx]).strip()
+                    if not val or val.lower() in ["none", "null"]:
+                        continue
+                    if "@" in val and "." in val:
+                        email_score += 2.0
+                    elif len(val) >= 4 and any(c.isdigit() for c in val) and any(c.isalpha() for c in val):
+                        roll_score += 1.5
+                    elif val.isdigit() and len(val) >= 5 and len(val) <= 15:
+                        roll_score += 1.0
+                    elif len(val) >= 3 and len(val) <= 45 and all(x.isalpha() or x.isspace() or x=='.' for x in val):
+                        name_score += 1.0
+                col_scores.append({'roll': roll_score, 'name': name_score, 'email': email_score})
+
+            if num_cols >= 2:
+                sorted_roll = sorted(range(num_cols), key=lambda i: col_scores[i]['roll'], reverse=True)
+                sorted_name = sorted(range(num_cols), key=lambda i: col_scores[i]['name'], reverse=True)
+                roll_idx = sorted_roll[0]
+                name_idx = next((i for i in sorted_name if i != roll_idx), 1)
+                header_idx = 0
+
+        start_row = header_idx + 1 if header_idx != -1 else 0
+        for row in raw_rows[start_row:]:
+            if not row or len(row) <= max(roll_idx, name_idx):
+                continue
+            roll_no = str(row[roll_idx]).strip() if roll_idx < len(row) else ""
+            name = str(row[name_idx]).strip() if name_idx < len(row) else ""
+            if not roll_no or not name:
+                continue
+            if roll_no.lower() in ["roll", "reg", "s.no", "sl.no", "name"] or name.lower() in ["name", "student name"]:
+                continue
+            # If roll_no is accidentally name and name is roll_no, swap
+            if any(c.isdigit() for c in name) and not any(c.isdigit() for c in roll_no):
+                roll_no, name = name, roll_no
+            email = str(row[email_idx]).strip() if (email_idx != -1 and len(row) > email_idx and "@" in str(row[email_idx])) else f"{roll_no.lower()}@student.edu"
+            row_sec = str(row[sec_idx]).strip() if (sec_idx != -1 and len(row) > sec_idx and str(row[sec_idx]).strip()) else target_sec
+            students_to_process.append({
+                "roll_no": roll_no,
+                "name": name,
+                "email": email,
+                "class_section": row_sec
+            })
 
     elif filename.endswith(".xlsx") or filename.endswith(".xls"):
         import openpyxl
@@ -854,14 +928,14 @@ async def upload_namelist(
             # Step A: Attempt standard header-based matching
             for idx, r in enumerate(rows[:15]):
                 cells = [str(c).lower().strip() if c is not None else "" for c in r]
-                r_idx = next((i for i, c in enumerate(cells) if any(x in c for x in ["roll", "reg", "admission", "student id", "r.no", "id"])), -1)
-                n_idx = next((i for i, c in enumerate(cells) if any(x in c for x in ["name", "fullname", "student name", "candidate"])), -1)
+                r_idx = next((i for i, c in enumerate(cells) if is_roll_header(c)), -1)
+                n_idx = next((i for i, c in enumerate(cells) if is_name_header(c)), -1)
                 if r_idx != -1 and n_idx != -1:
                     header_idx = idx
                     roll_col = r_idx
                     name_col = n_idx
                     email_col = next((i for i, c in enumerate(cells) if any(x in c for x in ["email", "mail", "e-mail"])), -1)
-                    sec_col = next((i for i, c in enumerate(cells) if any(x in c for x in ["section", "class", "sec"])), -1)
+                    sec_col = next((i for i, c in enumerate(cells) if any(x in c for x in ["section", "class", "sec", "dept"])), -1)
                     break
                     
             # Step B: If headers are not matched, perform statistical column classification
@@ -926,12 +1000,20 @@ async def upload_namelist(
             raise HTTPException(status_code=400, detail=f"Failed to parse Excel: {str(e)}")
 
     elif filename.endswith(".pdf"):
-        import pypdf
+        pdf_text = ""
         try:
-            reader = pypdf.PdfReader(io.BytesIO(contents))
-            pdf_text = ""
+            reader = None
+            try:
+                import pypdf
+                reader = pypdf.PdfReader(io.BytesIO(contents))
+            except Exception:
+                import PyPDF2
+                reader = PyPDF2.PdfReader(io.BytesIO(contents))
+            
             for page in reader.pages:
-                pdf_text += page.extract_text() + "\n"
+                extracted = page.extract_text()
+                if extracted:
+                    pdf_text += extracted + "\n"
                 
             if not pdf_text.strip():
                 raise HTTPException(status_code=400, detail="No readable text found in PDF file.")
@@ -983,12 +1065,26 @@ async def upload_namelist(
     students_created = 0
     students_updated = 0
     
+    valid_students_processed = []
+
     for s_data in students_to_process:
         roll_no = s_data.get("roll_no", "").strip()
         name = s_data.get("name", "").strip()
         if not roll_no or not name:
             continue
             
+        # Strict validation: prevent binary noise, control characters, or invalid roll numbers
+        if len(roll_no) < 3 or len(roll_no) > 25:
+            continue
+        if any(ord(c) < 32 or ord(c) > 126 for c in roll_no):
+            continue
+        if not re.match(r'^[A-Za-z0-9][A-Za-z0-9\-_./]*[A-Za-z0-9]$', roll_no):
+            continue
+        if len(name) < 2 or len(name) > 60:
+            continue
+        if any(ord(c) < 32 or ord(c) > 126 for c in name):
+            continue
+
         email = s_data.get("email", "").strip() or f"{roll_no.lower()}@student.edu"
         row_sec = s_data.get("class_section", "").strip() or class_section
         
@@ -1075,13 +1171,34 @@ async def upload_namelist(
                 )
                 db.add(sub)
                 
+        valid_students_processed.append({
+            "roll_no": roll_no,
+            "name": name,
+            "email": email,
+            "class_section": row_sec,
+            "date": "2026-07-27",
+            "status": "Present"
+        })
+
     db.commit()
     return {
         "status": "success",
         "message": f"Namelist processed: {students_created} students created, {students_updated} updated.",
         "created": students_created,
-        "updated": students_updated
+        "updated": students_updated,
+        "students": valid_students_processed
     }
+
+
+@app.post("/api/attendance/upload-namelist")
+async def upload_namelist_attendance_alias(
+    file: UploadFile = File(...),
+    class_section: str = Form(None),
+    dept: str = Form(None),
+    subject: str = Form("Design & Analysis of Algorithms"),
+    db: Session = Depends(get_db)
+):
+    return await upload_namelist(file=file, class_section=class_section, dept=dept, subject=subject, db=db)
 
 
 @app.post("/api/academic/deduplicate")
@@ -1994,6 +2111,691 @@ def api_get_event_day_checklist(event_id: int, db: Session = Depends(get_db)):
 @app.get("/api/events/{event_id}/report")
 def api_get_post_event_report(event_id: int, db: Session = Depends(get_db)):
     return generate_post_event_report(event_id, db)
+
+
+# ==========================================
+# REST API FOR ALUMNI RELATIONS (AGENT 8)
+# ==========================================
+
+@app.get("/api/alumni")
+def get_alumni_list(
+    search: Optional[str] = None,
+    batch: Optional[int] = None,
+    department: Optional[str] = None,
+    industry: Optional[str] = None,
+    company: Optional[str] = None,
+    mentorship_available: Optional[bool] = None,
+    engagement_status: Optional[str] = None,
+    sort_by: Optional[str] = "name",
+    db: Session = Depends(get_db)
+):
+    query = db.query(Alumni)
+    if batch:
+        query = query.filter(Alumni.graduation_year == batch)
+    if department and department != "All":
+        query = query.filter(Alumni.department == department)
+    if industry and industry != "All":
+        query = query.filter(Alumni.industry.ilike(f"%{industry}%"))
+    if company and company != "All":
+        query = query.filter(Alumni.current_company.ilike(f"%{company}%"))
+    if mentorship_available is not None:
+        query = query.filter(Alumni.mentorship_available == mentorship_available)
+    if engagement_status and engagement_status != "All":
+        query = query.filter(Alumni.engagement_status == engagement_status)
+    if search:
+        search_pattern = f"%{search}%"
+        query = query.filter(
+            (Alumni.name.ilike(search_pattern)) |
+            (Alumni.current_company.ilike(search_pattern)) |
+            (Alumni.skills.ilike(search_pattern)) |
+            (Alumni.designation.ilike(search_pattern)) |
+            (Alumni.location.ilike(search_pattern))
+        )
+
+    if sort_by == "batch":
+        query = query.order_by(Alumni.graduation_year.desc())
+    elif sort_by == "score":
+        query = query.order_by(Alumni.engagement_score.desc())
+    elif sort_by == "recent":
+        query = query.order_by(Alumni.last_interaction_date.desc().nullslast())
+    else:
+        query = query.order_by(Alumni.name.asc())
+
+    records = query.all()
+    results = []
+    for a in records:
+        results.append({
+            "id": a.id,
+            "name": a.name,
+            "email": a.email,
+            "phone": a.phone,
+            "graduation_year": a.graduation_year,
+            "degree": a.degree,
+            "department": a.department,
+            "current_company": a.current_company,
+            "designation": a.designation,
+            "industry": a.industry,
+            "location": a.location,
+            "skills": a.skills,
+            "linkedin_url": a.linkedin_url,
+            "avatar_url": a.avatar_url,
+            "mentorship_available": a.mentorship_available,
+            "mentorship_topics": a.mentorship_topics,
+            "willing_to_refer": a.willing_to_refer,
+            "willing_guest_lectures": a.willing_guest_lectures,
+            "engagement_status": a.engagement_status,
+            "engagement_score": a.engagement_score,
+            "last_interaction_date": a.last_interaction_date,
+            "consent_status": a.consent_status,
+            "interactions_count": len(a.interactions) if a.interactions else 0,
+            "mentorships_count": len(a.mentorships) if a.mentorships else 0,
+            "contributions_count": len(a.contributions) if a.contributions else 0
+        })
+    return results
+
+@app.get("/api/alumni/{alumni_id}")
+def get_alumni_detail(alumni_id: int, db: Session = Depends(get_db)):
+    alumnus = db.query(Alumni).filter(Alumni.id == alumni_id).first()
+    if not alumnus:
+        raise HTTPException(status_code=404, detail="Alumnus not found")
+
+    interactions = db.query(AlumniInteraction).filter(AlumniInteraction.alumni_id == alumni_id).order_by(AlumniInteraction.date.desc()).all()
+    mentorships = db.query(AlumniMentorship).filter(AlumniMentorship.alumni_id == alumni_id).all()
+    contributions = db.query(AlumniContribution).filter(AlumniContribution.alumni_id == alumni_id).all()
+    follow_ups = db.query(AlumniFollowUpTask).filter(AlumniFollowUpTask.alumni_id == alumni_id).all()
+
+    return {
+        "id": alumnus.id,
+        "name": alumnus.name,
+        "email": alumnus.email,
+        "phone": alumnus.phone,
+        "graduation_year": alumnus.graduation_year,
+        "degree": alumnus.degree,
+        "department": alumnus.department,
+        "current_company": alumnus.current_company,
+        "designation": alumnus.designation,
+        "industry": alumnus.industry,
+        "location": alumnus.location,
+        "skills": alumnus.skills,
+        "linkedin_url": alumnus.linkedin_url,
+        "avatar_url": alumnus.avatar_url,
+        "mentorship_available": alumnus.mentorship_available,
+        "mentorship_topics": alumnus.mentorship_topics,
+        "willing_to_refer": alumnus.willing_to_refer,
+        "willing_guest_lectures": alumnus.willing_guest_lectures,
+        "engagement_status": alumnus.engagement_status,
+        "engagement_score": alumnus.engagement_score,
+        "last_interaction_date": alumnus.last_interaction_date,
+        "consent_status": alumnus.consent_status,
+        "interactions": [
+            {
+                "id": i.id,
+                "type": i.interaction_type,
+                "date": i.date,
+                "summary": i.summary,
+                "outcome": i.outcome
+            }
+            for i in interactions
+        ],
+        "mentorships": [
+            {
+                "id": m.id,
+                "student_name": m.student_name,
+                "topic": m.topic,
+                "status": m.status,
+                "request_date": m.request_date,
+                "rating": m.feedback_rating
+            }
+            for m in mentorships
+        ],
+        "contributions": [
+            {
+                "id": c.id,
+                "category": c.category,
+                "amount": c.amount,
+                "description": c.description,
+                "date": c.date,
+                "status": c.status
+            }
+            for c in contributions
+        ],
+        "follow_ups": [
+            {
+                "id": f.id,
+                "title": f.title,
+                "assigned_to": f.assigned_to,
+                "due_date": f.due_date,
+                "priority": f.priority,
+                "status": f.status
+            }
+            for f in follow_ups
+        ]
+    }
+
+@app.post("/api/alumni")
+def create_alumnus(payload: dict = Body(...), db: Session = Depends(get_db)):
+    name = payload.get("name")
+    if not name:
+        raise HTTPException(status_code=400, detail="Alumnus name is required")
+
+    email = payload.get("email")
+    if email:
+        existing = db.query(Alumni).filter(Alumni.email == email).first()
+        if existing:
+            raise HTTPException(status_code=400, detail="Alumnus with this email already exists")
+
+    new_alumnus = Alumni(
+        name=name,
+        email=email,
+        phone=payload.get("phone"),
+        graduation_year=int(payload.get("graduation_year", 2024)),
+        degree=payload.get("degree", "B.Tech"),
+        department=payload.get("department", "CSE"),
+        current_company=payload.get("current_company", "Independent"),
+        designation=payload.get("designation", "Software Engineer"),
+        industry=payload.get("industry", "Technology"),
+        location=payload.get("location", "Bengaluru"),
+        skills=payload.get("skills", ""),
+        linkedin_url=payload.get("linkedin_url"),
+        avatar_url=payload.get("avatar_url"),
+        mentorship_available=bool(payload.get("mentorship_available", True)),
+        mentorship_topics=payload.get("mentorship_topics", ""),
+        willing_to_refer=bool(payload.get("willing_to_refer", True)),
+        willing_guest_lectures=bool(payload.get("willing_guest_lectures", True)),
+        engagement_status=payload.get("engagement_status", "Newly Registered"),
+        engagement_score=int(payload.get("engagement_score", 70)),
+        last_interaction_date=payload.get("last_interaction_date"),
+        consent_status=payload.get("consent_status", "Opt-in")
+    )
+    db.add(new_alumnus)
+    db.commit()
+    db.refresh(new_alumnus)
+    return {"status": "success", "id": new_alumnus.id, "name": new_alumnus.name}
+
+@app.put("/api/alumni/{alumni_id}")
+def update_alumnus(alumni_id: int, payload: dict = Body(...), db: Session = Depends(get_db)):
+    alumnus = db.query(Alumni).filter(Alumni.id == alumni_id).first()
+    if not alumnus:
+        raise HTTPException(status_code=404, detail="Alumnus not found")
+
+    for field in [
+        "name", "email", "phone", "degree", "department", "current_company",
+        "designation", "industry", "location", "skills", "linkedin_url",
+        "avatar_url", "mentorship_topics", "engagement_status", "consent_status"
+    ]:
+        if field in payload:
+            setattr(alumnus, field, payload[field])
+
+    if "graduation_year" in payload:
+        alumnus.graduation_year = int(payload["graduation_year"])
+    if "mentorship_available" in payload:
+        alumnus.mentorship_available = bool(payload["mentorship_available"])
+    if "willing_to_refer" in payload:
+        alumnus.willing_to_refer = bool(payload["willing_to_refer"])
+    if "willing_guest_lectures" in payload:
+        alumnus.willing_guest_lectures = bool(payload["willing_guest_lectures"])
+    if "engagement_score" in payload:
+        alumnus.engagement_score = int(payload["engagement_score"])
+
+    db.commit()
+    db.refresh(alumnus)
+    return {"status": "success", "id": alumnus.id, "name": alumnus.name}
+
+@app.delete("/api/alumni/{alumni_id}")
+def delete_alumnus(alumni_id: int, db: Session = Depends(get_db)):
+    alumnus = db.query(Alumni).filter(Alumni.id == alumni_id).first()
+    if not alumnus:
+        raise HTTPException(status_code=404, detail="Alumnus not found")
+    db.delete(alumnus)
+    db.commit()
+    return {"status": "success", "message": f"Alumnus {alumni_id} deleted"}
+
+# --- Interactions ---
+@app.post("/api/alumni/{alumni_id}/interactions")
+def log_alumni_interaction(alumni_id: int, payload: dict = Body(...), db: Session = Depends(get_db)):
+    alumnus = db.query(Alumni).filter(Alumni.id == alumni_id).first()
+    if not alumnus:
+        raise HTTPException(status_code=404, detail="Alumnus not found")
+
+    date_val = payload.get("date", datetime.datetime.now().strftime("%Y-%m-%d"))
+    interaction = AlumniInteraction(
+        alumni_id=alumni_id,
+        faculty_id=payload.get("faculty_id", 1),
+        interaction_type=payload.get("interaction_type", "Meeting"),
+        date=date_val,
+        summary=payload.get("summary", "Interaction logged."),
+        outcome=payload.get("outcome", "Completed")
+    )
+    db.add(interaction)
+    alumnus.last_interaction_date = date_val
+    alumnus.engagement_score = min(100, (alumnus.engagement_score or 70) + 5)
+    if alumnus.engagement_status in ["Inactive", "Requires Follow-up"]:
+        alumnus.engagement_status = "Active"
+
+    db.commit()
+    return {"status": "success", "interaction_id": interaction.id}
+
+# --- Mentorship ---
+@app.get("/api/alumni/mentorships/all")
+def get_all_alumni_mentorships(status: Optional[str] = None, db: Session = Depends(get_db)):
+    query = db.query(AlumniMentorship)
+    if status and status != "All":
+        query = query.filter(AlumniMentorship.status == status)
+    records = query.order_by(AlumniMentorship.request_date.desc()).all()
+    results = []
+    for m in records:
+        alumnus = db.query(Alumni).filter(Alumni.id == m.alumni_id).first()
+        results.append({
+            "id": m.id,
+            "alumni_id": m.alumni_id,
+            "alumni_name": alumnus.name if alumnus else "Unknown",
+            "alumni_company": alumnus.current_company if alumnus else "",
+            "alumni_role": alumnus.designation if alumnus else "",
+            "student_name": m.student_name,
+            "student_roll_no": m.student_roll_no,
+            "student_department": m.student_department,
+            "topic": m.topic,
+            "request_date": m.request_date,
+            "status": m.status,
+            "goals": m.goals,
+            "meeting_link": m.meeting_link,
+            "session_notes": m.session_notes,
+            "feedback_rating": m.feedback_rating,
+            "feedback_text": m.feedback_text
+        })
+    return results
+
+@app.post("/api/alumni/mentorships")
+def create_alumni_mentorship(payload: dict = Body(...), db: Session = Depends(get_db)):
+    alumni_id = payload.get("alumni_id")
+    student_name = payload.get("student_name")
+    topic = payload.get("topic")
+    if not all([alumni_id, student_name, topic]):
+        raise HTTPException(status_code=400, detail="Missing required mentorship request fields")
+
+    mentorship = AlumniMentorship(
+        alumni_id=int(alumni_id),
+        student_name=student_name,
+        student_roll_no=payload.get("student_roll_no", ""),
+        student_department=payload.get("student_department", "CSE"),
+        topic=topic,
+        request_date=payload.get("request_date", datetime.datetime.now().strftime("%Y-%m-%d")),
+        status=payload.get("status", "Pending"),
+        goals=payload.get("goals", ""),
+        meeting_link=payload.get("meeting_link", "")
+    )
+    db.add(mentorship)
+    db.commit()
+    db.refresh(mentorship)
+    return {"status": "success", "id": mentorship.id}
+
+@app.put("/api/alumni/mentorships/{mentorship_id}/status")
+def update_alumni_mentorship_status(mentorship_id: int, payload: dict = Body(...), db: Session = Depends(get_db)):
+    m = db.query(AlumniMentorship).filter(AlumniMentorship.id == mentorship_id).first()
+    if not m:
+        raise HTTPException(status_code=404, detail="Mentorship request not found")
+
+    new_status = payload.get("status")
+    if new_status:
+        m.status = new_status
+        if new_status == "Completed":
+            m.completed_at = datetime.datetime.now().strftime("%Y-%m-%d")
+    if "session_notes" in payload:
+        m.session_notes = payload["session_notes"]
+    if "meeting_link" in payload:
+        m.meeting_link = payload["meeting_link"]
+    if "feedback_rating" in payload:
+        m.feedback_rating = int(payload["feedback_rating"])
+    if "feedback_text" in payload:
+        m.feedback_text = payload["feedback_text"]
+
+    db.commit()
+    return {"status": "success", "id": m.id, "new_status": m.status}
+
+# --- Events & Guest Lectures ---
+@app.get("/api/alumni/events/all")
+def get_all_alumni_events(db: Session = Depends(get_db)):
+    events = db.query(AlumniEvent).order_by(AlumniEvent.date.desc()).all()
+    return [
+        {
+            "id": e.id,
+            "title": e.title,
+            "event_type": e.event_type,
+            "date": e.date,
+            "time": e.time,
+            "venue": e.venue,
+            "target_audience": e.target_audience,
+            "coordinator_name": e.coordinator_name,
+            "alumni_speaker_id": e.alumni_speaker_id,
+            "alumni_speaker_name": e.alumni_speaker_name,
+            "status": e.status,
+            "expected_attendees": e.expected_attendees,
+            "actual_attendees": e.actual_attendees,
+            "description": e.description,
+            "feedback_summary": e.feedback_summary
+        }
+        for e in events
+    ]
+
+@app.post("/api/alumni/events")
+def create_alumni_event(payload: dict = Body(...), db: Session = Depends(get_db)):
+    title = payload.get("title")
+    if not title:
+        raise HTTPException(status_code=400, detail="Event title is required")
+
+    event = AlumniEvent(
+        title=title,
+        event_type=payload.get("event_type", "Guest Lecture"),
+        date=payload.get("date", datetime.datetime.now().strftime("%Y-%m-%d")),
+        time=payload.get("time", "10:00 AM"),
+        venue=payload.get("venue", "Seminar Hall"),
+        target_audience=payload.get("target_audience", "All Students"),
+        coordinator_name=payload.get("coordinator_name", "Alumni Coordinator"),
+        alumni_speaker_id=payload.get("alumni_speaker_id"),
+        alumni_speaker_name=payload.get("alumni_speaker_name", "Distinguished Alumnus"),
+        status=payload.get("status", "Upcoming"),
+        expected_attendees=int(payload.get("expected_attendees", 50)),
+        actual_attendees=int(payload.get("actual_attendees", 0)),
+        description=payload.get("description", "")
+    )
+    db.add(event)
+    db.commit()
+    db.refresh(event)
+    return {"status": "success", "id": event.id}
+
+@app.put("/api/alumni/events/{event_id}")
+def update_alumni_event(event_id: int, payload: dict = Body(...), db: Session = Depends(get_db)):
+    e = db.query(AlumniEvent).filter(AlumniEvent.id == event_id).first()
+    if not e:
+        raise HTTPException(status_code=404, detail="Event not found")
+
+    for f in ["title", "event_type", "date", "time", "venue", "target_audience", "coordinator_name", "status", "description", "feedback_summary"]:
+        if f in payload:
+            setattr(e, f, payload[f])
+    if "actual_attendees" in payload:
+        e.actual_attendees = int(payload["actual_attendees"])
+    db.commit()
+    return {"status": "success", "id": e.id}
+
+# --- Contributions & Partnerships ---
+@app.get("/api/alumni/contributions/all")
+def get_all_alumni_contributions(db: Session = Depends(get_db)):
+    contributions = db.query(AlumniContribution).order_by(AlumniContribution.date.desc()).all()
+    return [
+        {
+            "id": c.id,
+            "alumni_id": c.alumni_id,
+            "alumni_name": c.alumni_name,
+            "category": c.category,
+            "amount": c.amount,
+            "description": c.description,
+            "date": c.date,
+            "status": c.status,
+            "verified_by": c.verified_by,
+            "impact_summary": c.impact_summary
+        }
+        for c in contributions
+    ]
+
+@app.post("/api/alumni/contributions")
+def create_alumni_contribution(payload: dict = Body(...), db: Session = Depends(get_db)):
+    contrib = AlumniContribution(
+        alumni_id=payload.get("alumni_id"),
+        alumni_name=payload.get("alumni_name", "Alumnus"),
+        category=payload.get("category", "Guest Lecture"),
+        amount=float(payload.get("amount", 0.0)) if payload.get("amount") else 0.0,
+        description=payload.get("description", ""),
+        date=payload.get("date", datetime.datetime.now().strftime("%Y-%m-%d")),
+        status=payload.get("status", "Pending Verification"),
+        verified_by=payload.get("verified_by"),
+        impact_summary=payload.get("impact_summary")
+    )
+    db.add(contrib)
+    db.commit()
+    db.refresh(contrib)
+    return {"status": "success", "id": contrib.id}
+
+@app.put("/api/alumni/contributions/{contribution_id}/status")
+def update_contribution_status(contribution_id: int, payload: dict = Body(...), db: Session = Depends(get_db)):
+    c = db.query(AlumniContribution).filter(AlumniContribution.id == contribution_id).first()
+    if not c:
+        raise HTTPException(status_code=404, detail="Contribution record not found")
+    c.status = payload.get("status", c.status)
+    if "verified_by" in payload:
+        c.verified_by = payload["verified_by"]
+    if "impact_summary" in payload:
+        c.impact_summary = payload["impact_summary"]
+    db.commit()
+    return {"status": "success", "id": c.id, "status": c.status}
+
+# --- Follow-up Tasks ---
+@app.get("/api/alumni/follow-ups/all")
+def get_all_alumni_follow_ups(db: Session = Depends(get_db)):
+    tasks = db.query(AlumniFollowUpTask).order_by(AlumniFollowUpTask.due_date.asc()).all()
+    return [
+        {
+            "id": t.id,
+            "alumni_id": t.alumni_id,
+            "alumni_name": t.alumni_name,
+            "assigned_to": t.assigned_to,
+            "title": t.title,
+            "due_date": t.due_date,
+            "priority": t.priority,
+            "status": t.status,
+            "notes": t.notes
+        }
+        for t in tasks
+    ]
+
+@app.post("/api/alumni/follow-ups")
+def create_alumni_follow_up(payload: dict = Body(...), db: Session = Depends(get_db)):
+    task = AlumniFollowUpTask(
+        alumni_id=payload.get("alumni_id"),
+        alumni_name=payload.get("alumni_name", "Alumnus"),
+        assigned_to=payload.get("assigned_to", "Alumni Coordinator"),
+        title=payload.get("title", "Follow up with alumnus"),
+        due_date=payload.get("due_date", datetime.datetime.now().strftime("%Y-%m-%d")),
+        priority=payload.get("priority", "Medium"),
+        status="Pending",
+        notes=payload.get("notes", "")
+    )
+    db.add(task)
+    db.commit()
+    db.refresh(task)
+    return {"status": "success", "id": task.id}
+
+@app.put("/api/alumni/follow-ups/{task_id}")
+def update_alumni_follow_up(task_id: int, payload: dict = Body(...), db: Session = Depends(get_db)):
+    t = db.query(AlumniFollowUpTask).filter(AlumniFollowUpTask.id == task_id).first()
+    if not t:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if "status" in payload:
+        t.status = payload["status"]
+    if "priority" in payload:
+        t.priority = payload["priority"]
+    if "due_date" in payload:
+        t.due_date = payload["due_date"]
+    if "notes" in payload:
+        t.notes = payload["notes"]
+    db.commit()
+    return {"status": "success", "id": t.id}
+
+# --- Analytics Summary ---
+@app.get("/api/alumni/analytics/summary")
+def get_alumni_analytics_summary(db: Session = Depends(get_db)):
+    alumni_list = db.query(Alumni).all()
+    total = len(alumni_list)
+    active = len([a for a in alumni_list if a.engagement_status == "Active"])
+    engagement_rate = round((active / total * 100), 1) if total > 0 else 0
+
+    dept_counts = {}
+    batch_counts = {}
+    industry_counts = {}
+    for a in alumni_list:
+        dept_counts[a.department] = dept_counts.get(a.department, 0) + 1
+        batch_counts[str(a.graduation_year)] = batch_counts.get(str(a.graduation_year), 0) + 1
+        ind = a.industry.split("&")[0].strip() if a.industry else "Other"
+        industry_counts[ind] = industry_counts.get(ind, 0) + 1
+
+    mentorships = db.query(AlumniMentorship).all()
+    completed_mentorships = len([m for m in mentorships if m.status == "Completed"])
+    accepted_mentorships = len([m for m in mentorships if m.status == "Accepted"])
+    pending_mentorships = len([m for m in mentorships if m.status == "Pending"])
+
+    contributions = db.query(AlumniContribution).all()
+    total_financial = sum(c.amount or 0.0 for c in contributions)
+
+    events = db.query(AlumniEvent).all()
+    tasks = db.query(AlumniFollowUpTask).all()
+    overdue_tasks = len([t for t in tasks if t.status == "Overdue"])
+    pending_tasks = len([t for t in tasks if t.status in ["Pending", "In Progress"]])
+
+    return {
+        "total_alumni": total,
+        "active_alumni": active,
+        "engagement_rate": engagement_rate,
+        "department_distribution": dept_counts,
+        "batch_distribution": batch_counts,
+        "industry_distribution": industry_counts,
+        "mentorship": {
+            "total": len(mentorships),
+            "completed": completed_mentorships,
+            "accepted": accepted_mentorships,
+            "pending": pending_mentorships
+        },
+        "contributions": {
+            "total_count": len(contributions),
+            "total_funds": total_financial
+        },
+        "events_count": len(events),
+        "tasks": {
+            "pending": pending_tasks,
+            "overdue": overdue_tasks
+        }
+    }
+
+# --- AI Matchmaker & Recommendations ---
+@app.post("/api/alumni/match")
+def match_alumni_opportunities(payload: dict = Body(...), db: Session = Depends(get_db)):
+    match_type = payload.get("type", "student_mentor")
+    skills = payload.get("skills", [])
+    dept = payload.get("department")
+    topic = payload.get("topic", "")
+
+    query = db.query(Alumni)
+    if match_type == "student_mentor":
+        query = query.filter(Alumni.mentorship_available == True)
+    elif match_type == "guest_speaker":
+        query = query.filter(Alumni.willing_guest_lectures == True)
+
+    candidates = query.all()
+    matches = []
+    for c in candidates:
+        score = 65
+        reasons = []
+        if dept and c.department == dept:
+            score += 10
+            reasons.append(f"Same department ({c.department})")
+
+        candidate_skills = [s.strip().lower() for s in (c.skills or "").split(",") if s.strip()]
+        matched_skills = []
+        for s in skills:
+            s_low = s.strip().lower()
+            if any(s_low in cs or cs in s_low for cs in candidate_skills):
+                matched_skills.append(s)
+                score += 12
+
+        if matched_skills:
+            reasons.append(f"Matched skills: {', '.join(matched_skills)}")
+
+        if topic and c.mentorship_topics and any(w in c.mentorship_topics.lower() for w in topic.lower().split()):
+            score += 10
+            reasons.append(f"Domain alignment with topic: {topic}")
+
+        if c.engagement_score:
+            score += int(c.engagement_score * 0.1)
+
+        score = min(score, 99)
+        if not reasons:
+            reasons.append("High overall engagement and active alumni profile")
+
+        matches.append({
+            "id": c.id,
+            "name": c.name,
+            "company": c.current_company,
+            "designation": c.designation,
+            "batch": c.graduation_year,
+            "department": c.department,
+            "skills": c.skills,
+            "score": score,
+            "reasons": reasons,
+            "avatar_url": c.avatar_url,
+            "mentorship_available": c.mentorship_available,
+            "willing_guest_lectures": c.willing_guest_lectures
+        })
+
+    matches.sort(key=lambda x: x["score"], reverse=True)
+    return {"matches": matches[:8]}
+
+@app.get("/api/alumni/recommendations/smart")
+def get_alumni_smart_recommendations(db: Session = Depends(get_db)):
+    recs = []
+
+    # 1. Stale contacts (> 90 days or Inactive)
+    stale = db.query(Alumni).filter(
+        (Alumni.engagement_status.in_(["Inactive", "Requires Follow-up"])) |
+        (Alumni.last_interaction_date < "2026-07-01")
+    ).all()
+    for s in stale[:3]:
+        recs.append({
+            "type": "re_engagement",
+            "title": f"Re-engage {s.name} ({s.current_company})",
+            "category": "High Priority Outreach",
+            "description": f"Last contacted on {s.last_interaction_date or 'N/A'}. Previously indicated willingness to support {s.skills or 'academic programs'}.",
+            "action_text": "Schedule Follow-up",
+            "alumni_id": s.id,
+            "alumni_name": s.name
+        })
+
+    # 2. Mentorship requests pending
+    pending_m = db.query(AlumniMentorship).filter(AlumniMentorship.status == "Pending").all()
+    for pm in pending_m:
+        alumnus = db.query(Alumni).filter(Alumni.id == pm.alumni_id).first()
+        recs.append({
+            "type": "mentorship_approval",
+            "title": f"Review Mentorship: {pm.student_name} → {alumnus.name if alumnus else 'Alumnus'}",
+            "category": "Student Mentorship",
+            "description": f"Requested guidance on '{pm.topic}' ({pm.request_date}). Action required to confirm mentor slot.",
+            "action_text": "Review & Approve",
+            "alumni_id": pm.alumni_id,
+            "alumni_name": alumnus.name if alumnus else ""
+        })
+
+    # 3. Upcoming events needing speakers
+    upcoming_events = db.query(AlumniEvent).filter(AlumniEvent.status == "Upcoming", AlumniEvent.alumni_speaker_id == None).all()
+    for ue in upcoming_events:
+        recs.append({
+            "type": "speaker_needed",
+            "title": f"Identify Speaker for '{ue.title}'",
+            "category": "Event Coordination",
+            "description": f"Scheduled on {ue.date}. Suggesting qualified alumni with matching domain expertise.",
+            "action_text": "Match Speaker",
+            "event_id": ue.id
+        })
+
+    # 4. Overdue follow-up tasks
+    overdue_tasks = db.query(AlumniFollowUpTask).filter(AlumniFollowUpTask.status == "Overdue").all()
+    for ot in overdue_tasks:
+        recs.append({
+            "type": "overdue_task",
+            "title": f"Overdue Action: {ot.title}",
+            "category": "Coordinator Task",
+            "description": f"Assigned to {ot.assigned_to}. Due date was {ot.due_date}.",
+            "action_text": "Update Task",
+            "task_id": ot.id
+        })
+
+    return {"recommendations": recs}
 
 
 # ==========================================
